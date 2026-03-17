@@ -1,0 +1,17 @@
+{
+  "name": "@vtrixai/sandbox",
+  "version": "0.1.0",
+  "description": "Vtrix sandbox SDK",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.4.0"
+  }
+}
