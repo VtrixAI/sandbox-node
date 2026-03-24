@@ -611,7 +611,7 @@ function buildExecParams(cmd: string, args: string[] | undefined, defaultEnv: Re
   if (opts?.working_dir) params['working_dir'] = opts.working_dir;
   if (opts?.timeout_sec) params['timeout'] = opts.timeout_sec;
   if (opts?.sudo) params['sudo'] = true;
-  if (opts?.stdin) params['stdin'] = opts.stdin;
+  if (opts?.stdin) params['stdin_data'] = opts.stdin;
   return params;
 }
 

@@ -24,8 +24,8 @@ const sb = await client.create({
   spec: { cpu: '2', memory: '4Gi' },
 } satisfies CreateOptions);
 
-const result = await sb.execute('echo hello && uname -a');
-console.log(`exit_code=${result.exit_code}`);
+const result = await sb.runCommand('echo hello && uname -a');
+console.log(`exit_code=${result.exitCode}`);
 console.log(result.output);
 
 sb.close();
@@ -54,26 +54,26 @@ const info = await client.get(sandboxId);        // get sandbox metadata
 ### Execute
 
 ```typescript
-import { ExecOptions } from '@vtrixai/sandbox';
+import { RunOptions } from '@vtrixai/sandbox';
 
 // Blocking — waits for command to finish
-const result = await sb.execute('command', {
+const result = await sb.runCommand('command', undefined, {
   working_dir: '/tmp',
   timeout_sec: 30,
   env: { FOO: 'bar' },
   sudo: false,
   stdin: '',
-} satisfies ExecOptions);
-// result.exit_code, result.output, result.cmd_id
+} satisfies RunOptions);
+// result.exitCode, result.output, result.cmdId
 
 // Streaming — real-time stdout/stderr
-for await (const ev of sb.executeStream('command')) {
+for await (const ev of sb.runCommandStream('command')) {
   // ev.type: "start" | "stdout" | "stderr" | "done"
   // ev.data
 }
 
 // Detached — returns immediately
-const cmd = await sb.executeDetached('long-running-command');
+const cmd = await sb.runCommand('long-running-command', undefined, { detached: true });
 // cmd.cmdId, cmd.pid
 
 // Command methods
@@ -88,6 +88,11 @@ const out    = await cmd.collectOutput('both');  // "stdout"|"stderr"|"both"
 
 // Reconnect to a known command
 const cmd = sb.getCommand(cmdId);
+
+// Attach to a running or completed command and replay its output
+for await (const ev of sb.execLogs(cmdId)) {
+  // ev.type: "start" | "stdout" | "stderr" | "done"
+}
 ```
 
 ### File Operations
@@ -101,8 +106,8 @@ const result = await sb.write('/path/to/file', 'content');
 const result = await sb.edit('/path/to/file', 'old text', 'new text');
 
 // Binary files
-await sb.writeFiles([{ path: '/tmp/data.bin', content: Buffer.from('...') }]);
-const data = await sb.readToBuffer('/path/to/file'); // Buffer
+await sb.writeFiles([{ path: '/tmp/data.bin', content: Buffer.from('...'), mode: 0o755 }]);
+const data = await sb.readToBuffer('/path/to/file'); // Buffer or null if not found
 
 // Directory
 await sb.mkDir('/path/to/dir');
@@ -120,7 +125,7 @@ const downloaded = await sb.downloadFiles([
   { sandboxPath: '/a.txt', localPath: 'a.txt' },
 ]);
 
-// Stream large files
+// Stream large files (yields Buffer chunks)
 for await (const chunk of sb.readStream('/large/file', 65536)) {
   // chunk: Buffer
 }
@@ -138,10 +143,10 @@ await sb.refresh(client);
 await sb.stop(client, { blocking: true } satisfies StopOptions);
 await sb.start(client);
 await sb.restart(client);
-await sb.extend(client, 12);          // extend TTL by 12h
-await sb.extendTimeout(client, 12);   // extend + refresh
+await sb.extend(client, 12 * 3_600_000);          // extend TTL by 12h (milliseconds)
+await sb.extendTimeout(client, 12 * 3_600_000);   // extend + refresh
 await sb.update(client, { ... } satisfies UpdateOptions);
-await sb.configure(client);           // apply config to pod
+await sb.configure(client);                        // apply config to pod
 await sb.delete(client);
 
 sb.status;    // cached status string
@@ -154,9 +159,10 @@ See the [`examples/`](examples/) directory:
 
 | File | Description |
 |------|-------------|
-| `examples/basic.ts` | Create sandbox, run commands |
-| `examples/stream.ts` | Real-time streaming output |
-| `examples/attach.ts` | Reconnect to existing sandbox |
+| `examples/basic.ts` | Create sandbox, run commands, detached exec |
+| `examples/stream.ts` | Real-time streaming, exec_logs replay, Command.logs/stdout |
+| `examples/attach.ts` | Reconnect to an existing sandbox by ID |
+| `examples/files.ts` | File read/write/edit/upload/download/stream |
 | `examples/lifecycle.ts` | Stop/start/extend/update/delete |
 
 Run an example:

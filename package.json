@@ -1,9 +1,28 @@
 {
   "name": "@vtrixai/sandbox",
   "version": "0.1.0",
-  "description": "Vtrix sandbox SDK",
+  "description": "Vtrix sandbox SDK — Node.js/TypeScript client for Vtrix sandbox environments",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "license": "MIT",
+  "author": "VtrixAI",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/VtrixAI/sandbox-node"
+  },
+  "keywords": [
+    "sandbox",
+    "code-execution",
+    "vtrix",
+    "devbox"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
     "prepare": "tsc"

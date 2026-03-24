@@ -22,7 +22,7 @@ async function main() {
   const sb = await client.attach(sandboxId);
   console.log(`Attached: ${sb.info.id} (status=${sb.info.status})`);
 
-  const result = await sb.execute('hostname && date');
+  const result = await sb.runCommand('hostname && date');
   console.log(result.output);
 
   sb.close();

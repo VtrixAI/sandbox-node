@@ -23,13 +23,13 @@ export class Client {
   async create(opts: CreateOptions): Promise<Sandbox> {
     const info = await this._createSandbox(opts);
     const active = await this._pollUntilActive(info.id, opts);
-    return this._connect(active, opts);
+    return await this._connect(active, opts);
   }
 
   async attach(sandboxId: string, token?: string, serviceID?: string): Promise<Sandbox> {
     const opts: CreateOptions = { user_id: '', token, service_id: serviceID };
     const info = await this._getSandbox(sandboxId, opts);
-    return this._connect(info, opts);
+    return await this._connect(info, opts);
   }
 
   // ── Lifecycle ────────────────────────────────────────────
@@ -135,7 +135,7 @@ export class Client {
     throw new SandboxError(`timed out waiting for sandbox ${id} to become active`);
   }
 
-  private _connect(info: SandboxInfo, opts: CreateOptions): Sandbox {
+  private _connect(info: SandboxInfo, opts: CreateOptions): Promise<Sandbox> {
     const wsURL = this.baseURL
       .replace(/^https:\/\//, 'wss://')
       .replace(/^http:\/\//, 'ws://');
@@ -153,7 +153,10 @@ export class Client {
     const protocols: string[] = token ? [`bearer.${token}`] : [];
 
     const ws = new WebSocket(url, protocols, { headers });
-    return new Sandbox(info, ws, opts.env ?? {});
+    return new Promise<Sandbox>((resolve, reject) => {
+      ws.once('open', () => resolve(new Sandbox(info, ws, opts.env ?? {})));
+      ws.once('error', (err) => reject(err));
+    });
   }
 }
 
