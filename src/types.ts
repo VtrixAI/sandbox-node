@@ -42,7 +42,7 @@ export interface CreateOptions {
   env?: Record<string, string>;
 }
 
-export interface ExecOptions {
+export interface RunOptions {
   working_dir?: string;
   timeout_sec?: number;
   env?: Record<string, string>;
@@ -50,16 +50,15 @@ export interface ExecOptions {
   sudo?: boolean;
   /** Data written to the command's stdin before reading output. */
   stdin?: string;
-  /**
-   * Shell-quoted arguments appended to the command string.
-   * Prefer this over embedding arguments in the command string to avoid shell injection.
-   * Example: `execute('grep', { args: ['-r', 'pattern', '/path'] })`
-   */
-  args?: string[];
-  /** When set, stdout chunks are written here as they arrive. execute() uses streaming internally. */
+  /** When set, stdout chunks are written here as they arrive. runCommand() uses streaming internally. */
   stdout?: NodeJS.WritableStream;
-  /** When set, stderr chunks are written here as they arrive. execute() uses streaming internally. */
+  /** When set, stderr chunks are written here as they arrive. runCommand() uses streaming internally. */
   stderr?: NodeJS.WritableStream;
+  /**
+   * When true, runCommand() returns a Command immediately (background/detached execution).
+   * Use command.wait() to get the final result.
+   */
+  detached?: boolean;
 }
 
 /** Options for Sandbox.downloadFile. */
@@ -88,12 +87,16 @@ export interface ExecResult {
   cmd_id: string;
   output: string;
   exit_code: number;
+  /** RFC3339 UTC timestamp of when the command started. Empty if not available. */
+  started_at?: string;
 }
 
 /** Result of executeDetached — identifies the background command. */
 export interface DetachedResult {
   cmd_id: string;
   pid: number;
+  /** RFC3339 UTC timestamp of when the command started. */
+  started_at?: string;
 }
 
 /** A single line of output from a running command. */

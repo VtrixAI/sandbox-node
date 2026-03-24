@@ -21,13 +21,13 @@ async function main() {
   console.log(`Sandbox ready: ${sb.info.id} (status=${sb.info.status})`);
 
   // 一次性执行
-  const result = await sb.execute('echo hello && uname -a');
-  console.log(`exit_code=${result.exit_code}`);
+  const result = await sb.runCommand('echo hello && uname -a');
+  console.log(`exit_code=${result.exitCode}`);
   console.log(`output:\n${result.output}`);
 
-  // 带选项
-  const result2 = await sb.execute('pwd', { working_dir: '/tmp', timeout_sec: 10 });
-  console.log(`pwd: ${result2.output.trim()}`);
+  // 带 args 和选项
+  const result2 = await sb.runCommand('ls', ['-la', '/tmp'], { working_dir: '/tmp', timeout_sec: 10 });
+  console.log(`ls -la /tmp:\n${result2.output.trim()}`);
 
   // 文件操作
   const wr = await sb.write('/tmp/hello.txt', 'Hello, Sandbox!\nLine 2\n');

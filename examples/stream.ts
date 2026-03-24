@@ -24,7 +24,7 @@ async function main() {
   `;
 
   console.log('Streaming:');
-  for await (const ev of sb.executeStream(cmd)) {
+  for await (const ev of sb.runCommandStream(cmd)) {
     switch (ev.type) {
       case 'start':  console.log('[start]'); break;
       case 'stdout': console.log(`[stdout] ${ev.data}`); break;

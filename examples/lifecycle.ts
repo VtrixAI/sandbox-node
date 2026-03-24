@@ -19,7 +19,7 @@ async function main() {
     console.log(`  ${info.id}  status=${info.status.padEnd(10)}  expires=${info.expire_at}`);
   }
 
-  // ── 创建 ──────────────────────────────────────────────
+  // ── 创建 ─────────────────────────────────────────────
   const sb = await client.create({
     user_id: 'user-123',
     ttl_hours: 1,
@@ -31,8 +31,8 @@ async function main() {
   const info = await client.get(sb.info.id);
   console.log(`Get: status=${info.status}, ip=${info.ip}`);
 
-  // ── 延期 ──────────────────────────────────────────────
-  await sb.extend(client, 12);
+  // ── 延期 (12h = 43_200_000 ms) ────────────────────────
+  await sb.extend(client, 43_200_000);
   console.log('Extended TTL by 12h');
 
   // ── 更新配置 ──────────────────────────────────────────
@@ -70,4 +70,3 @@ async function main() {
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
 main().catch(console.error);
-

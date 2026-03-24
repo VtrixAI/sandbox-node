@@ -5,7 +5,7 @@ export type {
   CreateOptions,
   Payload,
   Spec,
-  ExecOptions,
+  RunOptions,
   ExecResult,
   ExecEvent,
   LogEvent,

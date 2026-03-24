@@ -2,7 +2,7 @@ import WebSocket from 'ws';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
-  ExecOptions, ExecResult, ExecEvent, LogEvent, DetachedResult, WriteFileEntry,
+  RunOptions, ExecResult, ExecEvent, LogEvent, DetachedResult, WriteFileEntry,
   ReadResult, WriteResult, EditResult, DownloadOptions, DownloadEntry, StopOptions,
   FileEntry, FileInfo,
   SandboxInfo, RpcResponse, SandboxError, UpdateOptions, Payload,
@@ -22,7 +22,7 @@ interface PendingCall {
 
 /**
  * A background command that may still be running.
- * Obtained via `Sandbox.executeDetached` or `Sandbox.getCommand`.
+ * Obtained via `sandbox.runCommand({ detached: true })` or `Sandbox.getCommand`.
  */
 export class Command {
   readonly cmdId: string;
@@ -246,23 +246,34 @@ export class Sandbox {
 
   // ── Public API ─────────────────────────────────────────
 
-  /** Run a command and return its result as a CommandFinished.
+  /**
+   * Run a command and return its result as a CommandFinished.
+   * args are shell-quoted and appended to cmd to avoid shell injection.
+   * If opts.detached is true, returns a Command immediately (background execution).
    * If opts.stdout or opts.stderr are set, output is streamed to those writables as it arrives.
    */
-  async execute(command: string, opts?: ExecOptions): Promise<CommandFinished> {
-    if (opts?.stdout || opts?.stderr) {
-      return this._executeWithWriters(command, opts);
+  async runCommand(cmd: string, args?: string[], opts?: RunOptions & { detached: true }): Promise<Command>;
+  async runCommand(cmd: string, args?: string[], opts?: RunOptions & { detached?: false }): Promise<CommandFinished>;
+  async runCommand(cmd: string, args?: string[], opts?: RunOptions): Promise<Command | CommandFinished> {
+    if (opts?.detached) {
+      const params = { ...buildExecParams(cmd, args, this.defaultEnv, opts), detached: true };
+      const resp = await this._call('exec', params);
+      const r = resp.result as DetachedResult;
+      return new Command(this, r.cmd_id, r.pid, parseStartedAt(r.started_at), opts?.working_dir ?? '');
     }
-    const resp = await this._call('exec', buildExecParams(command, this.defaultEnv, opts));
+    if (opts?.stdout || opts?.stderr) {
+      return this._runCommandWithWriters(cmd, args, opts);
+    }
+    const resp = await this._call('exec', buildExecParams(cmd, args, this.defaultEnv, opts));
     const r = resp.result as ExecResult;
-    return new CommandFinished(this, r.cmd_id ?? '', 0, new Date(), opts?.working_dir ?? '', r.exit_code ?? 0, r.output ?? '');
+    return new CommandFinished(this, r.cmd_id ?? '', 0, parseStartedAt(r.started_at), opts?.working_dir ?? '', r.exit_code ?? 0, r.output ?? '');
   }
 
-  private async _executeWithWriters(command: string, opts: ExecOptions): Promise<CommandFinished> {
+  private async _runCommandWithWriters(cmd: string, args: string[] | undefined, opts: RunOptions): Promise<CommandFinished> {
     const events: (ExecEvent | null)[] = [];
     let notify: (() => void) | null = null;
     const onEvent = (ev: ExecEvent | null): void => { events.push(ev); notify?.(); };
-    const callPromise = this._call('exec', buildExecParams(command, this.defaultEnv, opts), onEvent);
+    const callPromise = this._call('exec', buildExecParams(cmd, args, this.defaultEnv, opts), onEvent);
 
     while (true) {
       if (events.length > 0) {
@@ -278,10 +289,14 @@ export class Sandbox {
 
     const resp = await callPromise;
     const r = resp.result as ExecResult;
-    return new CommandFinished(this, r.cmd_id ?? '', 0, new Date(), opts.working_dir ?? '', r.exit_code ?? 0, r.output ?? '');
+    return new CommandFinished(this, r.cmd_id ?? '', 0, parseStartedAt(r.started_at), opts.working_dir ?? '', r.exit_code ?? 0, r.output ?? '');
   }
 
-  async *executeStream(command: string, opts?: ExecOptions): AsyncGenerator<ExecEvent> {
+  /**
+   * Run a command and stream ExecEvents in real time.
+   * args are shell-quoted and appended to cmd.
+   */
+  async *runCommandStream(cmd: string, args?: string[], opts?: RunOptions): AsyncGenerator<ExecEvent> {
     const events: (ExecEvent | null)[] = [];
     let notify: (() => void) | null = null;
 
@@ -290,7 +305,7 @@ export class Sandbox {
       notify?.();
     };
 
-    const callPromise = this._call('exec', buildExecParams(command, this.defaultEnv, opts), onEvent);
+    const callPromise = this._call('exec', buildExecParams(cmd, args, this.defaultEnv, opts), onEvent);
 
     while (true) {
       if (events.length > 0) {
@@ -298,7 +313,6 @@ export class Sandbox {
         if (ev === null) break;
         yield ev;
       } else {
-        // wait for next event
         await new Promise<void>((res) => { notify = res; });
         notify = null;
       }
@@ -324,15 +338,7 @@ export class Sandbox {
 
   // ── Command system ───────────────────────────────────────
 
-  /** Start a command in background (detached) mode. Returns a Command immediately. */
-  async executeDetached(command: string, opts?: ExecOptions): Promise<Command> {
-    const params = { ...buildExecParams(command, this.defaultEnv, opts), detached: true };
-    const resp = await this._call('exec', params);
-    const r = resp.result as DetachedResult;
-    return new Command(this, r.cmd_id, r.pid, new Date(), opts?.working_dir ?? '');
-  }
-
-  /** Reconstruct a Command from a known cmd_id (e.g. after reconnect). */
+  /** Reconstruct a Command from a known cmdId (e.g. after reconnect). */
   getCommand(cmdId: string): Command {
     return new Command(this, cmdId);
   }
@@ -402,7 +408,7 @@ export class Sandbox {
 
   /** Create a directory (and all parents) inside the sandbox. */
   async mkDir(path: string): Promise<void> {
-    await this.execute(`mkdir -p ${JSON.stringify(path)}`);
+    await this.runCommand(`mkdir -p ${JSON.stringify(path)}`);
   }
 
   /**
@@ -545,19 +551,23 @@ export class Sandbox {
     await client._doPost(`/api/v1/sandbox/${this.info.id}/restart`);
   }
 
-  /** Extend TTL. hours=0 uses server default (12h). */
-  async extend(client: Client, hours = 0): Promise<void> {
+  /** Extend TTL by durationMs milliseconds. Pass 0 to use the server default (12h). */
+  async extend(client: Client, durationMs = 0): Promise<void> {
+    const hours = Math.floor(durationMs / 3_600_000);
     await client._doPost(`/api/v1/sandbox/${this.info.id}/extend`, { hours });
   }
 
-  /** Extend TTL and refresh info. hours=0 uses server default (12h). */
-  async extendTimeout(client: Client, hours = 0): Promise<void> {
-    await this.extend(client, hours);
+  /** Extend TTL by durationMs milliseconds and refresh info. Pass 0 to use the server default (12h). */
+  async extendTimeout(client: Client, durationMs = 0): Promise<void> {
+    await this.extend(client, durationMs);
     await this.refresh(client);
   }
 
   /** Current status from cached info (call refresh() first for live data). */
   get status(): string { return this.info.status; }
+
+  /** Sandbox creation time parsed from cached info.created_at. Returns a new Date each call. */
+  get createdAt(): Date { return new Date(this.info.created_at); }
 
   /** Sandbox expiry time from cached info (RFC3339). */
   get expireAt(): string { return this.info.expire_at; }
@@ -590,12 +600,12 @@ export class Sandbox {
   }
 }
 
-function buildExecParams(command: string, defaultEnv: Record<string, string>, opts?: ExecOptions): Record<string, unknown> {
+function buildExecParams(cmd: string, args: string[] | undefined, defaultEnv: Record<string, string>, opts?: RunOptions): Record<string, unknown> {
   // Append shell-quoted args to the command string if provided.
-  if (opts?.args && opts.args.length > 0) {
-    command = command + ' ' + opts.args.map(shellQuote).join(' ');
+  if (args && args.length > 0) {
+    cmd = cmd + ' ' + args.map(shellQuote).join(' ');
   }
-  const params: Record<string, unknown> = { command };
+  const params: Record<string, unknown> = { command: cmd };
   const merged = { ...defaultEnv, ...(opts?.env ?? {}) };
   if (Object.keys(merged).length > 0) params['env'] = merged;
   if (opts?.working_dir) params['working_dir'] = opts.working_dir;
@@ -608,4 +618,14 @@ function buildExecParams(command: string, defaultEnv: Record<string, string>, op
 /** Return a single-quoted shell-safe version of s. */
 function shellQuote(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'";
+}
+
+/**
+ * Parse an RFC3339 string from the server into a Date.
+ * Falls back to the current time when the string is empty or invalid.
+ */
+function parseStartedAt(s?: string): Date {
+  if (!s) return new Date();
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? new Date() : d;
 }
