@@ -56,6 +56,10 @@ export interface ExecOptions {
    * Example: `execute('grep', { args: ['-r', 'pattern', '/path'] })`
    */
   args?: string[];
+  /** When set, stdout chunks are written here as they arrive. execute() uses streaming internally. */
+  stdout?: NodeJS.WritableStream;
+  /** When set, stderr chunks are written here as they arrive. execute() uses streaming internally. */
+  stderr?: NodeJS.WritableStream;
 }
 
 /** Options for Sandbox.downloadFile. */
@@ -102,6 +106,8 @@ export interface LogEvent {
 export interface WriteFileEntry {
   path: string;
   content: Buffer | Uint8Array;
+  /** Optional Unix file permission bits (e.g. 0o755 for executable). Server default when omitted. */
+  mode?: number;
 }
 
 export interface ExecEvent {

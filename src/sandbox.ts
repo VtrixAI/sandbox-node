@@ -246,11 +246,39 @@ export class Sandbox {
 
   // ── Public API ─────────────────────────────────────────
 
-  /** Run a command and return its result as a CommandFinished. */
+  /** Run a command and return its result as a CommandFinished.
+   * If opts.stdout or opts.stderr are set, output is streamed to those writables as it arrives.
+   */
   async execute(command: string, opts?: ExecOptions): Promise<CommandFinished> {
+    if (opts?.stdout || opts?.stderr) {
+      return this._executeWithWriters(command, opts);
+    }
     const resp = await this._call('exec', buildExecParams(command, this.defaultEnv, opts));
     const r = resp.result as ExecResult;
     return new CommandFinished(this, r.cmd_id ?? '', 0, new Date(), opts?.working_dir ?? '', r.exit_code ?? 0, r.output ?? '');
+  }
+
+  private async _executeWithWriters(command: string, opts: ExecOptions): Promise<CommandFinished> {
+    const events: (ExecEvent | null)[] = [];
+    let notify: (() => void) | null = null;
+    const onEvent = (ev: ExecEvent | null): void => { events.push(ev); notify?.(); };
+    const callPromise = this._call('exec', buildExecParams(command, this.defaultEnv, opts), onEvent);
+
+    while (true) {
+      if (events.length > 0) {
+        const ev = events.shift()!;
+        if (ev === null) break;
+        if (ev.type === 'stdout' && opts.stdout) opts.stdout.write(ev.data ?? '');
+        else if (ev.type === 'stderr' && opts.stderr) opts.stderr.write(ev.data ?? '');
+      } else {
+        await new Promise<void>((res) => { notify = res; });
+        notify = null;
+      }
+    }
+
+    const resp = await callPromise;
+    const r = resp.result as ExecResult;
+    return new CommandFinished(this, r.cmd_id ?? '', 0, new Date(), opts.working_dir ?? '', r.exit_code ?? 0, r.output ?? '');
   }
 
   async *executeStream(command: string, opts?: ExecOptions): AsyncGenerator<ExecEvent> {
@@ -345,22 +373,32 @@ export class Sandbox {
 
   // ── File operations ──────────────────────────────────────
 
-  /** Write multiple files. content is raw bytes (base64-encoded over the wire). */
+  /** Write multiple files. content is raw bytes (base64-encoded over the wire).
+   * If WriteFileEntry.mode is set, that Unix permission is applied after writing.
+   */
   async writeFiles(files: WriteFileEntry[]): Promise<void> {
     for (const f of files) {
       const encoded = Buffer.from(f.content).toString('base64');
-      await this._call('write_binary', { path: f.path, data: encoded });
+      const params: Record<string, unknown> = { path: f.path, data: encoded };
+      if (f.mode !== undefined) params['mode'] = f.mode;
+      await this._call('write_binary', params);
     }
   }
 
-  /** Read a file and return its raw bytes. */
-  async readToBuffer(path: string): Promise<Buffer> {
-    const result = await this.read(path);
+  /** Read a file and return its raw bytes. Returns null if the file does not exist. */
+  async readToBuffer(path: string): Promise<Buffer | null> {
+    let result: ReadResult;
+    try {
+      result = await this.read(path);
+    } catch (e) {
+      if (e instanceof SandboxError && e.code === -32001) return null; // file not found
+      throw e;
+    }
     if (result.type === 'image') {
       return Buffer.from(result.data ?? '', 'base64');
     }
     return Buffer.from(result.content ?? '', 'utf-8');
-  }
+}
 
   /** Create a directory (and all parents) inside the sandbox. */
   async mkDir(path: string): Promise<void> {
@@ -369,10 +407,11 @@ export class Sandbox {
 
   /**
    * Download a file from the sandbox to a local path.
-   * Returns the absolute local path of the saved file.
+   * Returns the absolute local path of the saved file, or null if the file does not exist.
    */
-  async downloadFile(sandboxPath: string, localPath: string, opts?: DownloadOptions): Promise<string> {
+  async downloadFile(sandboxPath: string, localPath: string, opts?: DownloadOptions): Promise<string | null> {
     const data = await this.readToBuffer(sandboxPath);
+    if (data === null) return null;
     const abs = path.resolve(localPath);
     if (opts?.mkdirRecursive) {
       fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -383,10 +422,10 @@ export class Sandbox {
 
   /**
    * Download multiple files concurrently from the sandbox to local paths.
-   * Returns a map of sandboxPath → absolute local path.
+   * Returns a map of sandboxPath → absolute local path (null if file not found).
    * Rejects on first error.
    */
-  async downloadFiles(files: DownloadEntry[], opts?: DownloadOptions): Promise<Map<string, string>> {
+  async downloadFiles(files: DownloadEntry[], opts?: DownloadOptions): Promise<Map<string, string | null>> {
     const results = await Promise.all(
       files.map(async (f) => {
         const localPath = await this.downloadFile(f.sandboxPath, f.localPath, opts);
@@ -522,6 +561,16 @@ export class Sandbox {
 
   /** Sandbox expiry time from cached info (RFC3339). */
   get expireAt(): string { return this.info.expire_at; }
+
+  /**
+   * Remaining sandbox lifetime in milliseconds based on cached info.expire_at.
+   * Returns 0 if expire_at is empty or already past. Call refresh() first for live data.
+   */
+  get timeout(): number {
+    if (!this.info.expire_at) return 0;
+    const ms = new Date(this.info.expire_at).getTime() - Date.now();
+    return ms > 0 ? ms : 0;
+  }
 
   async update(client: Client, opts: UpdateOptions): Promise<void> {
     const body: Record<string, unknown> = {};
