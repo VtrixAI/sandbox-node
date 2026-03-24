@@ -50,6 +50,12 @@ export interface ExecOptions {
   sudo?: boolean;
   /** Data written to the command's stdin before reading output. */
   stdin?: string;
+  /**
+   * Shell-quoted arguments appended to the command string.
+   * Prefer this over embedding arguments in the command string to avoid shell injection.
+   * Example: `execute('grep', { args: ['-r', 'pattern', '/path'] })`
+   */
+  args?: string[];
 }
 
 /** Options for Sandbox.downloadFile. */

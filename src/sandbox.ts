@@ -28,13 +28,25 @@ export class Command {
   readonly cmdId: string;
   readonly pid: number;
   readonly startedAt: Date;
+  /** Working directory the command was started in (empty if not known). */
+  readonly cwd: string;
   protected readonly _sandbox: Sandbox;
+  protected _exitCode: number | null = null;
 
-  constructor(sandbox: Sandbox, cmdId: string, pid = 0, startedAt?: Date) {
+  constructor(sandbox: Sandbox, cmdId: string, pid = 0, startedAt?: Date, cwd = '') {
     this.cmdId = cmdId;
     this.pid = pid;
     this.startedAt = startedAt ?? new Date();
+    this.cwd = cwd;
     this._sandbox = sandbox;
+  }
+
+  /**
+   * Exit code of the command. `null` while the command is still running;
+   * populated with the actual exit code after `wait()` resolves.
+   */
+  get exitCode(): number | null {
+    return this._exitCode;
   }
 
   /** Wait for the command to finish and return its result. */
@@ -57,7 +69,10 @@ export class Command {
 
     const resp = await callPromise;
     const r = resp.result as ExecResult;
-    return new CommandFinished(this._sandbox, this.cmdId, this.pid, this.startedAt, r.exit_code ?? 0, r.output ?? '');
+    const ec = r.exit_code ?? 0;
+    // populate the live exitCode property
+    this._exitCode = ec;
+    return new CommandFinished(this._sandbox, this.cmdId, this.pid, this.startedAt, this.cwd, ec, r.output ?? '');
   }
 
   /** Stream stdout/stderr log events from the command. */
@@ -104,7 +119,6 @@ export class Command {
 
 /** A completed command with its exit code and combined output. */
 export class CommandFinished extends Command {
-  readonly exitCode: number;
   readonly output: string;
 
   constructor(
@@ -112,11 +126,12 @@ export class CommandFinished extends Command {
     cmdId = '',
     pid = 0,
     startedAt?: Date,
+    cwd = '',
     exitCode = 0,
     output = '',
   ) {
-    super(sandbox, cmdId, pid, startedAt);
-    this.exitCode = exitCode;
+    super(sandbox, cmdId, pid, startedAt, cwd);
+    this._exitCode = exitCode;
     this.output = output;
   }
 }
@@ -235,7 +250,7 @@ export class Sandbox {
   async execute(command: string, opts?: ExecOptions): Promise<CommandFinished> {
     const resp = await this._call('exec', buildExecParams(command, this.defaultEnv, opts));
     const r = resp.result as ExecResult;
-    return new CommandFinished(this, r.cmd_id ?? '', 0, new Date(), r.exit_code ?? 0, r.output ?? '');
+    return new CommandFinished(this, r.cmd_id ?? '', 0, new Date(), opts?.working_dir ?? '', r.exit_code ?? 0, r.output ?? '');
   }
 
   async *executeStream(command: string, opts?: ExecOptions): AsyncGenerator<ExecEvent> {
@@ -286,7 +301,7 @@ export class Sandbox {
     const params = { ...buildExecParams(command, this.defaultEnv, opts), detached: true };
     const resp = await this._call('exec', params);
     const r = resp.result as DetachedResult;
-    return new Command(this, r.cmd_id, r.pid, new Date());
+    return new Command(this, r.cmd_id, r.pid, new Date(), opts?.working_dir ?? '');
   }
 
   /** Reconstruct a Command from a known cmd_id (e.g. after reconnect). */
@@ -527,6 +542,10 @@ export class Sandbox {
 }
 
 function buildExecParams(command: string, defaultEnv: Record<string, string>, opts?: ExecOptions): Record<string, unknown> {
+  // Append shell-quoted args to the command string if provided.
+  if (opts?.args && opts.args.length > 0) {
+    command = command + ' ' + opts.args.map(shellQuote).join(' ');
+  }
   const params: Record<string, unknown> = { command };
   const merged = { ...defaultEnv, ...(opts?.env ?? {}) };
   if (Object.keys(merged).length > 0) params['env'] = merged;
@@ -535,4 +554,9 @@ function buildExecParams(command: string, defaultEnv: Record<string, string>, op
   if (opts?.sudo) params['sudo'] = true;
   if (opts?.stdin) params['stdin'] = opts.stdin;
   return params;
+}
+
+/** Return a single-quoted shell-safe version of s. */
+function shellQuote(s: string): string {
+  return "'" + s.replace(/'/g, "'\\''") + "'";
 }
