@@ -147,7 +147,12 @@ export class Client {
     const sid = opts.service_id ?? this.serviceID;
     if (sid) headers['X-Service-ID'] = sid;
 
-    const ws = new WebSocket(url, { headers });
+    // Pass token as a WebSocket subprotocol so browsers can authenticate.
+    // Browsers cannot set custom HTTP headers during WebSocket handshake;
+    // the server reads the Sec-WebSocket-Protocol header and echoes it back.
+    const protocols: string[] = token ? [`bearer.${token}`] : [];
+
+    const ws = new WebSocket(url, protocols, { headers });
     return new Sandbox(info, ws, opts.env ?? {});
   }
 }
