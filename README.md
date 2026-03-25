@@ -1,4 +1,4 @@
-# sandbox-node
+# @vtrixai/sandbox
 
 Node.js / TypeScript SDK for [Vtrix](https://github.com/VtrixAI) sandbox — run commands and manage files in isolated Linux environments over a persistent WebSocket connection.
 
@@ -32,34 +32,51 @@ console.log(result.output);
 sb.close();
 ```
 
-## API Reference
+## Core classes
 
-### Client
+| Class | What it does |
+|---|---|
+| [`Client`](#client) | Creates and manages sandbox instances |
+| [`Sandbox`](#sandbox) | Runs commands and manages files in an isolated environment |
+| [`Command`](#command) | Handles a running or completed process |
+| [`CommandFinished`](#command) | Result after a command completes — extends `Command` with `exitCode` and `output` |
 
-#### `new Client(opts: ClientOptions)`
+---
 
-Creates a new client. The client is reusable across multiple sandbox sessions.
+## Client
 
-| Field | Type | Description |
-|---|---|---|
-| `baseURL` | `string` | Hermes gateway URL (e.g. `http://host:8080`). |
-| `token` | `string` | Bearer token for authentication. |
-| `serviceID` | `string` | Value sent as `X-Service-ID` header. |
+### `new Client(opts: ClientOptions)`
 
-#### `await client.create(opts) → Sandbox`
+Creates a new client. The client is reusable and safe for concurrent use across multiple sandbox sessions.
 
-Creates a new sandbox, polls until it becomes active, and opens a WebSocket connection. This is the primary entry point for starting a sandbox session.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `baseURL` | `string` | Yes | Hermes gateway URL (e.g. `http://host:8080`). |
+| `token` | `string` | No | Bearer token for authentication. |
+| `serviceID` | `string` | No | Value sent as `X-Service-ID` header. |
 
-| Parameter | Type | Description |
-|---|---|---|
-| `opts.user_id` | `string` | Owner of the sandbox. |
-| `opts.spec` | `Spec` | Optional resource spec (`cpu`, `memory`, `image`). |
-| `opts.labels` | `Record<string, string>` | Arbitrary key-value metadata attached to the sandbox. |
-| `opts.payloads` | `Payload[]` | Initialisation calls sent to the pod after creation. |
-| `opts.ttl_hours` | `number` | Sandbox lifetime in hours. Uses the server default when `0`. |
-| `opts.env` | `Record<string, string>` | Default environment variables inherited by all commands. Per-command `RunOptions.env` values override these. |
+```typescript
+const client = new Client({
+  baseURL:   'http://your-hermes-host:8080',
+  token:     'your-token',
+  serviceID: 'your-service-id',
+});
+```
+
+### `await client.create(opts) → Sandbox`
+
+Use `client.create()` to launch a new sandbox, poll until it is active, and open a WebSocket connection. This is the primary entry point for starting a sandbox session. Pass `env` to set default environment variables that all commands in this sandbox will inherit.
 
 **Returns:** `Promise<Sandbox>`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `opts.user_id` | `string` | Yes | Owner of the sandbox. |
+| `opts.spec` | `Spec` | No | Resource spec (`cpu`, `memory`, `image`). |
+| `opts.labels` | `Record<string, string>` | No | Arbitrary key-value metadata attached to the sandbox. |
+| `opts.payloads` | `Payload[]` | No | Initialisation calls sent to the pod after creation. |
+| `opts.ttl_hours` | `number` | No | Sandbox lifetime in hours. Uses the server default when `0`. |
+| `opts.env` | `Record<string, string>` | No | Default environment variables inherited by all commands. Per-command `RunOptions.env` values override these. |
 
 ```typescript
 const sb = await client.create({
@@ -70,61 +87,125 @@ const sb = await client.create({
 });
 ```
 
-#### `await client.attach(sandboxId, token?, serviceID?) → Sandbox`
+### `await client.attach(sandboxId, token?, serviceID?) → Sandbox`
 
-Connects to an existing sandbox without creating a new one. Use this to resume a session after a restart or to connect from a different process. Omit `token` and `serviceID` to fall back to the client-level values.
+Use `client.attach()` to connect to an existing sandbox without creating a new one. Use this to resume a session after a restart or to connect from a different process. Omit `token` and `serviceID` to fall back to the client-level values.
 
 **Returns:** `Promise<Sandbox>`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `sandboxId` | `string` | Yes | ID of the sandbox to connect to. |
+| `token` | `string` | No | Override the client-level token for this connection. |
+| `serviceID` | `string` | No | Override the client-level service ID for this connection. |
 
 ```typescript
 const sb = await client.attach('sandbox-id-abc');
 ```
 
-#### `await client.list(opts?) → ListResult`
+### `await client.list(opts?) → ListResult`
 
-Lists sandboxes visible to the current credentials. Filter by `user_id` or `status` to scope results.
-
-| Parameter | Type | Description |
-|---|---|---|
-| `opts.user_id` | `string` | Return only sandboxes owned by this user. |
-| `opts.status` | `string` | Filter by status: `"active"`, `"stopped"`, etc. |
-| `opts.limit` | `number` | Maximum number of results. |
-| `opts.offset` | `number` | Pagination offset. |
+Use `client.list()` to enumerate sandboxes visible to the current credentials. Filter by `user_id` or `status` to scope results.
 
 **Returns:** `Promise<ListResult>` — `.items` is `SandboxInfo[]`, `.pagination` has `total`, `limit`, `offset`, `has_more`.
 
-#### `await client.get(sandboxId) → SandboxInfo`
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `opts.user_id` | `string` | No | Return only sandboxes owned by this user. |
+| `opts.status` | `string` | No | Filter by status: `"active"`, `"stopped"`, etc. |
+| `opts.limit` | `number` | No | Maximum number of results. |
+| `opts.offset` | `number` | No | Pagination offset. |
 
-Fetches metadata for a sandbox by ID without opening a WebSocket connection.
+```typescript
+const { items, pagination } = await client.list({ user_id: 'user-123', status: 'active' });
+console.log(`Found ${pagination.total} sandboxes`);
+```
 
-#### `await client.delete(sandboxId)`
+### `await client.get(sandboxId) → SandboxInfo`
 
-Permanently deletes a sandbox. This cannot be undone.
+Use `client.get()` to fetch metadata for a sandbox by ID without opening a WebSocket connection.
+
+**Returns:** `Promise<SandboxInfo>`
+
+```typescript
+const info = await client.get('sandbox-id-abc');
+console.log(info.status);
+```
+
+### `await client.delete(sandboxId)`
+
+Call `client.delete()` to permanently delete a sandbox. This cannot be undone.
+
+**Returns:** `Promise<void>`
+
+```typescript
+await client.delete('sandbox-id-abc');
+```
 
 ---
 
-### Running Commands
+## Sandbox
 
-#### `await sandbox.runCommand(cmd, args?, opts?) → CommandFinished | Command`
+A `Sandbox` instance gives you full control over an isolated environment. You receive one from `client.create()` or `client.attach()`.
 
-Runs a command inside the sandbox. By default, blocks until the command finishes and returns the result. Set `opts.detached: true` to return immediately with a `Command` handle for background execution.
+### Properties
+
+#### `sandbox.status → string`
+
+The `status` property reports the cached lifecycle state of the sandbox. Call `sandbox.refresh(client)` first if you need a live value.
+
+**Returns:** `string` — `"active"`, `"stopped"`, `"destroying"`, etc.
+
+```typescript
+console.log(sb.status);
+```
+
+#### `sandbox.expireAt → string`
+
+The `expireAt` property returns the cached expiry timestamp. Call `sandbox.refresh(client)` first for an accurate value.
+
+**Returns:** `string` — RFC 3339 timestamp.
+
+```typescript
+console.log(sb.expireAt);
+```
+
+#### `sandbox.timeout → number`
+
+The `timeout` property returns the remaining sandbox lifetime in milliseconds based on the cached `expireAt`. Returns `0` if the sandbox has already expired. Compare against upcoming commands and call `sandbox.extendTimeout()` if the window is too short.
+
+**Returns:** `number` — milliseconds remaining; `0` if expired.
+
+```typescript
+if (sb.timeout < 60_000) {
+  await sb.extendTimeout(client, 30 * 60 * 1000);
+}
+```
+
+---
+
+## Running Commands
+
+### `await sandbox.runCommand(cmd, args?, opts?) → CommandFinished | Command`
+
+`sandbox.runCommand()` executes a command inside the sandbox. By default it blocks until the command finishes and returns a `CommandFinished` result. Set `opts.detached: true` to return immediately with a `Command` handle for background execution.
 
 Set `opts.stdout` or `opts.stderr` to receive output in real time while still blocking — useful for progress logging.
 
-| Parameter | Type | Description |
-|---|---|---|
-| `cmd` | `string` | Shell command to run. |
-| `args` | `string[]` | Arguments shell-quoted and appended to `cmd`. Prevents injection. |
-| `opts.working_dir` | `string` | Working directory inside the sandbox. |
-| `opts.timeout_sec` | `number` | Kill the command after this many seconds. |
-| `opts.env` | `Record<string, string>` | Per-command environment variables. Merges with sandbox defaults. |
-| `opts.sudo` | `boolean` | Prepend `sudo -E` to the command. |
-| `opts.stdin` | `string` | Data written to the command's stdin before reading output. |
-| `opts.stdout` | `NodeJS.WritableStream` | Receives stdout chunks as they arrive. |
-| `opts.stderr` | `NodeJS.WritableStream` | Receives stderr chunks as they arrive. |
-| `opts.detached` | `boolean` | Return a `Command` immediately without waiting for completion. |
-
 **Returns:** `Promise<CommandFinished>` when `detached` is `false` (default); `Promise<Command>` when `detached` is `true`.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `cmd` | `string` | Yes | Shell command to run. |
+| `args` | `string[]` | No | Arguments shell-quoted and appended to `cmd`. Prevents injection. |
+| `opts.working_dir` | `string` | No | Working directory inside the sandbox. |
+| `opts.timeout_sec` | `number` | No | Kill the command after this many seconds. |
+| `opts.env` | `Record<string, string>` | No | Per-command environment variables. Merges with sandbox defaults. |
+| `opts.sudo` | `boolean` | No | Prepend `sudo -E` to the command. |
+| `opts.stdin` | `string` | No | Data written to the command's stdin before reading output. |
+| `opts.stdout` | `NodeJS.WritableStream` | No | Receives stdout chunks as they arrive. |
+| `opts.stderr` | `NodeJS.WritableStream` | No | Receives stderr chunks as they arrive. |
+| `opts.detached` | `boolean` | No | Return a `Command` immediately without waiting for completion. |
 
 ```typescript
 // Blocking with live output
@@ -133,17 +214,22 @@ const result = await sb.runCommand('npm install', undefined, {
   stdout: process.stdout,
   stderr: process.stderr,
 });
+console.log(`exit_code=${result.exitCode}`);
 
 // Detached (background) execution
 const cmd = await sb.runCommand('node server.js', undefined, {
   working_dir: '/app',
   detached: true,
 });
+// ... do other work ...
+const finished = await cmd.wait();
 ```
 
-#### `for await (const ev of sandbox.runCommandStream(cmd, args?, opts?)) → AsyncGenerator<ExecEvent>`
+### `for await (const ev of sandbox.runCommandStream(cmd, args?, opts?)) → AsyncGenerator<ExecEvent>`
 
-Runs a command and streams `ExecEvent` values in real time. Use this instead of `runCommand` when you need to process stdout and stderr as separate, typed events (e.g. to display them with different colours).
+Use `sandbox.runCommandStream()` to run a command and stream `ExecEvent` values in real time. Use this instead of `runCommand` when you need to process stdout and stderr as separate, typed events — for example, to display them with different colours or route them to different log streams.
+
+**Returns:** `AsyncGenerator<ExecEvent>`
 
 | `ev.type` | Meaning |
 |---|---|
@@ -159,9 +245,15 @@ for await (const ev of sb.runCommandStream('make build')) {
 }
 ```
 
-#### `for await (const ev of sandbox.execLogs(cmdId)) → AsyncGenerator<ExecEvent>`
+### `for await (const ev of sandbox.execLogs(cmdId)) → AsyncGenerator<ExecEvent>`
 
-Attaches to a running or completed command and streams its output. Replays buffered output first (up to 512 KB), then streams live events for commands still running. Use this to replay logs from a detached command or to attach a second observer.
+Use `sandbox.execLogs()` to attach to a running or completed command and stream its output. It replays buffered output first (up to 512 KB), then streams live events for commands still running. Use this to replay logs from a detached command or to attach a second observer.
+
+**Returns:** `AsyncGenerator<ExecEvent>`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `cmdId` | `string` | Yes | ID of the command to attach to. |
 
 ```typescript
 for await (const ev of sb.execLogs(cmd.cmdId)) {
@@ -169,78 +261,145 @@ for await (const ev of sb.execLogs(cmd.cmdId)) {
 }
 ```
 
-#### `sandbox.getCommand(cmdId) → Command`
+### `sandbox.getCommand(cmdId) → Command`
 
-Reconstructs a `Command` handle from a known `cmdId`. Use this to reconnect to a command started in a previous call without going through `runCommand` again.
+Use `sandbox.getCommand()` to reconstruct a `Command` handle from a known `cmdId`. Use this to reconnect to a command started in a previous call without going through `runCommand` again.
 
 **Returns:** `Command`
 
-#### `await sandbox.kill(cmdId, signal?)`
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `cmdId` | `string` | Yes | ID of the command to retrieve. |
 
-Sends a signal to a running command by ID. The signal is sent to the entire process group, so child processes are also terminated.
+```typescript
+const cmd = sb.getCommand('cmd-id-abc');
+const result = await cmd.wait();
+```
 
-| Parameter | Type | Description |
-|---|---|---|
-| `cmdId` | `string` | ID of the command to signal. |
-| `signal` | `string` | Signal name: `"SIGTERM"` (default), `"SIGKILL"`, `"SIGINT"`, `"SIGHUP"`. |
+### `await sandbox.kill(cmdId, signal?)`
+
+Call `sandbox.kill()` to send a signal to a running command by ID. The signal is sent to the entire process group, so child processes are also terminated. Send `SIGTERM` for graceful shutdown or `SIGKILL` for immediate termination.
+
+**Returns:** `Promise<void>`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `cmdId` | `string` | Yes | ID of the command to signal. |
+| `signal` | `string` | No | Signal name: `"SIGTERM"` (default), `"SIGKILL"`, `"SIGINT"`, `"SIGHUP"`. |
+
+```typescript
+await sb.kill(cmd.cmdId, 'SIGTERM');
+```
 
 ---
 
-### Command
+## Command
 
-A `Command` represents a running or completed process. You receive one from `runCommand({ detached: true })` or `getCommand()`. `CommandFinished` extends `Command` and adds `exitCode` and `output`.
+A `Command` represents a running or completed process. You receive one from `sandbox.runCommand({ detached: true })` or `sandbox.getCommand()`. `CommandFinished` extends `Command` and adds `exitCode` and `output`.
 
-**Properties:** `cmdId`, `pid`, `cwd`, `startedAt` (`Date`), `exitCode` (`number | null` — `null` while still running).
+### Properties
 
-#### `await command.wait() → CommandFinished`
+| Property | Type | Description |
+|---|---|---|
+| `cmdId` | `string` | Unique identifier for this command execution. |
+| `pid` | `number` | Process ID inside the sandbox. |
+| `cwd` | `string` | Working directory where the command is executing. |
+| `startedAt` | `Date` | Timestamp when the command started. |
+| `exitCode` | `number \| null` | Exit status. `null` while the command is still running. |
 
-Blocks until the command finishes and returns the final result. Essential after `runCommand({ detached: true })` when you need the exit code or output.
+### `await command.wait() → CommandFinished`
+
+Use `command.wait()` to block until a detached command finishes and get the resulting `CommandFinished` object. This method is essential after `runCommand({ detached: true })` when you need the exit code or output.
 
 **Returns:** `Promise<CommandFinished>` — `exitCode`, `output`, `cmdId`.
 
-#### `for await (const ev of command.logs()) → AsyncGenerator<LogEvent>`
-
-Streams structured log entries as they arrive. Each `LogEvent` has `stream` (`"stdout"` or `"stderr"`) and `data`. Use this instead of `execLogs` when you already have a `Command` handle.
-
 ```typescript
-for await (const ev of cmd.logs()) {
-  console.log(`[${ev.stream}] ${ev.data}`);
+const cmd = await sb.runCommand('node server.js', undefined, { detached: true });
+// ... do other work ...
+const result = await cmd.wait();
+if (result.exitCode !== 0) {
+  console.error('Command failed:', result.output);
 }
 ```
 
-#### `await command.stdout() → string`
+### `for await (const ev of command.logs()) → AsyncGenerator<LogEvent>`
 
-Collects the full standard output as a string. Call this after `wait()` when you need to parse the complete output rather than process it line by line.
+Call `command.logs()` to stream structured log entries as they arrive. Each `LogEvent` has `stream` (`"stdout"` or `"stderr"`) and `data`. Use this instead of `sandbox.execLogs()` when you already have a `Command` handle.
 
-#### `await command.stderr() → string`
+**Returns:** `AsyncGenerator<LogEvent>`
 
-Collects the full standard error output as a string.
+```typescript
+for await (const ev of cmd.logs()) {
+  if (ev.stream === 'stdout') process.stdout.write(ev.data);
+  else process.stderr.write(ev.data);
+}
+```
 
-#### `await command.collectOutput(stream) → string`
+### `await command.stdout() → string`
 
-Collects stdout, stderr, or both as a single string.
+Use `command.stdout()` to collect the full standard output as a string. Call this after `wait()` when you need to parse the complete output rather than process it line by line.
 
-| Parameter | Type | Description |
-|---|---|---|
-| `stream` | `"stdout" \| "stderr" \| "both"` | The output stream to collect. |
+**Returns:** `Promise<string>`
 
-#### `await command.kill(signal?)`
+```typescript
+const output = await cmd.stdout();
+const data = JSON.parse(output);
+```
 
-Sends a signal to this command. See `sandbox.kill` for valid signal names.
+### `await command.stderr() → string`
+
+Use `command.stderr()` to collect the full standard error output as a string. Combine with `exitCode` to build user-friendly error messages.
+
+**Returns:** `Promise<string>`
+
+```typescript
+const errors = await cmd.stderr();
+if (errors) console.error('Command errors:', errors);
+```
+
+### `await command.collectOutput(stream) → string`
+
+Use `command.collectOutput()` to collect stdout, stderr, or both as a single string. Choose `"both"` for combined output, or specify the stream you need to process separately.
+
+**Returns:** `Promise<string>`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `stream` | `"stdout" \| "stderr" \| "both"` | Yes | The output stream to collect. |
+
+```typescript
+const combined = await cmd.collectOutput('both');
+```
+
+### `await command.kill(signal?)`
+
+Call `command.kill()` to send a signal to this command. See `sandbox.kill()` for valid signal names.
+
+**Returns:** `Promise<void>`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `signal` | `string` | No | Signal name: `"SIGTERM"` (default), `"SIGKILL"`, `"SIGINT"`, `"SIGHUP"`. |
+
+```typescript
+await cmd.kill('SIGKILL');
+```
 
 ---
 
-### File Operations
+## File Operations
 
-#### `await sandbox.read(path) → ReadResult`
+### `await sandbox.read(path) → ReadResult`
 
-Reads a file from the sandbox. Text files up to 200 KB are returned in full; larger files are truncated (`truncated: true`). Image files are detected automatically and returned as base64-encoded data with a MIME type. Throws if the file does not exist.
+Use `sandbox.read()` to read a file from the sandbox. Text files up to 200 KB are returned in full; larger files are truncated (`truncated: true`). Image files are detected automatically and returned as base64-encoded data with a MIME type. Throws if the file does not exist.
+
+**Returns:** `Promise<ReadResult>`
 
 | Field | Type | Description |
 |---|---|---|
 | `type` | `"text" \| "image"` | Type of the file. |
 | `content` | `string` | File content (text files). |
-| `truncated` | `boolean` | `true` if the file was larger than 200 KB and content was cut. Use `readStream` for full content. |
+| `truncated` | `boolean` | `true` if the file was larger than 200 KB. Use `readStream` for the full content. |
 | `data` | `string` | Base64-encoded bytes (image files). |
 | `mime_type` | `string` | MIME type (image files, e.g. `"image/png"`). |
 
@@ -249,29 +408,52 @@ const result = await sb.read('/app/config.json');
 if (result.truncated) {
   // use readStream for the full file
 }
+console.log(result.content);
 ```
 
-#### `await sandbox.write(path, content) → WriteResult`
+### `await sandbox.write(path, content) → WriteResult`
 
-Writes a text string to a file. Creates parent directories automatically. Returns the number of bytes written.
+Use `sandbox.write()` to write a text string to a file. Creates parent directories automatically. Returns the number of bytes written.
 
 **Returns:** `Promise<WriteResult>` — `.bytes_written`.
 
-#### `await sandbox.edit(path, oldText, newText) → EditResult`
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `path` | `string` | Yes | Destination path inside the sandbox. |
+| `content` | `string` | Yes | Text content to write. |
 
-Replaces an exact occurrence of `oldText` with `newText` inside a file. Throws if `oldText` appears zero times or more than once — ensuring the edit is unambiguous.
+```typescript
+const result = await sb.write('/app/config.json', JSON.stringify(config));
+console.log(`Wrote ${result.bytes_written} bytes`);
+```
+
+### `await sandbox.edit(path, oldText, newText) → EditResult`
+
+Use `sandbox.edit()` to replace an exact occurrence of `oldText` with `newText` inside a file. Throws if `oldText` appears zero times or more than once — ensuring the edit is unambiguous.
 
 **Returns:** `Promise<EditResult>` — `.message`.
 
-#### `await sandbox.writeFiles(files)`
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `path` | `string` | Yes | Path to the file inside the sandbox. |
+| `oldText` | `string` | Yes | The exact text to find and replace. |
+| `newText` | `string` | Yes | The text to substitute in its place. |
 
-Writes one or more binary files in a single round trip. Creates parent directories automatically. Use this for uploading compiled binaries, images, or executable scripts.
+```typescript
+await sb.edit('/app/config.json', '"port": 3000', '"port": 8080');
+```
 
-| Parameter | Type | Description |
-|---|---|---|
-| `files[].path` | `string` | Destination path inside the sandbox. |
-| `files[].content` | `Buffer \| Uint8Array` | Raw file bytes. |
-| `files[].mode` | `number` | Unix permission bits (e.g. `0o755` for executable). Uses server default when omitted. |
+### `await sandbox.writeFiles(files)`
+
+Use `sandbox.writeFiles()` to upload one or more binary files in a single round trip. Creates parent directories automatically. Use this for uploading compiled binaries, images, or executable scripts.
+
+**Returns:** `Promise<void>`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `files[].path` | `string` | Yes | Destination path inside the sandbox. |
+| `files[].content` | `Buffer \| Uint8Array` | Yes | Raw file bytes. |
+| `files[].mode` | `number` | No | Unix permission bits (e.g. `0o755` for executable). Uses server default when omitted. |
 
 ```typescript
 await sb.writeFiles([
@@ -280,20 +462,33 @@ await sb.writeFiles([
 ]);
 ```
 
-#### `await sandbox.readToBuffer(path) → Buffer | null`
+### `await sandbox.readToBuffer(path) → Buffer | null`
 
-Reads a file into memory as a `Buffer`. Returns `null` (not an error) when the file does not exist, making it easy to check for optional files without try/catch.
+Use `sandbox.readToBuffer()` to read a file into memory as a `Buffer`. Returns `null` (not an error) when the file does not exist, making it easy to check for optional files without try/catch.
 
 **Returns:** `Promise<Buffer | null>` — `null` if the file does not exist.
 
-#### `for await (const chunk of sandbox.readStream(path, chunkSize?)) → AsyncGenerator<Buffer>`
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `path` | `string` | Yes | File path inside the sandbox. |
 
-Reads a large file in chunks. Use this instead of `read` when the file exceeds 200 KB or you need the complete binary content without truncation. Each `chunk` is already decoded (base64 decoding is handled internally).
+```typescript
+const buf = await sb.readToBuffer('/app/output.bin');
+if (buf !== null) {
+  process(buf);
+}
+```
 
-| Parameter | Type | Description |
-|---|---|---|
-| `path` | `string` | File path inside the sandbox. |
-| `chunkSize` | `number` | Bytes per chunk. Defaults to 65536. |
+### `for await (const chunk of sandbox.readStream(path, chunkSize?)) → AsyncGenerator<Buffer>`
+
+Use `sandbox.readStream()` to read a large file in chunks. Use this instead of `read` when the file exceeds 200 KB or you need complete binary content without truncation. Each `chunk` is already decoded (base64 decoding is handled internally).
+
+**Returns:** `AsyncGenerator<Buffer>`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `path` | `string` | Yes | File path inside the sandbox. |
+| `chunkSize` | `number` | No | Bytes per chunk. Defaults to 65536. |
 
 ```typescript
 import { createWriteStream } from 'fs';
@@ -301,21 +496,45 @@ const out = createWriteStream('large.csv');
 for await (const chunk of sb.readStream('/data/large.csv')) {
   out.write(chunk);
 }
+out.end();
 ```
 
-#### `await sandbox.mkDir(path)`
+### `await sandbox.mkDir(path)`
 
-Creates a directory and all parent directories. Safe to call on paths that already exist.
+Use `sandbox.mkDir()` to create a directory and all parent directories. Safe to call on paths that already exist.
 
-#### `await sandbox.listFiles(path) → FileEntry[]`
+**Returns:** `Promise<void>`
 
-Lists the contents of a directory. Throws if the path does not exist or is not a directory.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `path` | `string` | Yes | Directory to create. |
 
-Each `FileEntry` has: `name`, `path`, `size`, `is_dir`, `modified_at` (RFC 3339 string or `undefined`).
+```typescript
+await sb.mkDir('/app/logs');
+```
 
-#### `await sandbox.stat(path) → FileInfo`
+### `await sandbox.listFiles(path) → FileEntry[]`
 
-Returns metadata for a path. Unlike most operations, this does **not** throw when the path does not exist — check `info.exists` instead.
+Use `sandbox.listFiles()` to list the contents of a directory. Throws if the path does not exist or is not a directory.
+
+**Returns:** `Promise<FileEntry[]>` — each entry has `name`, `path`, `size`, `is_dir`, `modified_at` (RFC 3339 string or `undefined`).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `path` | `string` | Yes | Directory path inside the sandbox. |
+
+```typescript
+const entries = await sb.listFiles('/app');
+for (const entry of entries) {
+  console.log(`${entry.is_dir ? 'd' : 'f'} ${entry.name}`);
+}
+```
+
+### `await sandbox.stat(path) → FileInfo`
+
+Use `sandbox.stat()` to get metadata for a path. Unlike most operations, this does **not** throw when the path does not exist — check `info.exists` instead.
+
+**Returns:** `Promise<FileInfo>`
 
 | Field | Type | Description |
 |---|---|---|
@@ -325,112 +544,211 @@ Returns metadata for a path. Unlike most operations, this does **not** throw whe
 | `size` | `number` | File size in bytes. |
 | `modified_at` | `string \| undefined` | RFC 3339 timestamp, or `undefined`. |
 
-#### `await sandbox.exists(path) → boolean`
+```typescript
+const info = await sb.stat('/app/config.json');
+if (!info.exists) {
+  await sb.write('/app/config.json', '{}');
+}
+```
 
-Returns `true` if the path exists (file or directory). A convenient shorthand for `stat` when you only need the existence check.
+### `await sandbox.exists(path) → boolean`
 
-#### `await sandbox.uploadFile(localPath, sandboxPath, opts?)`
+Use `sandbox.exists()` to check whether a path exists. A convenient shorthand for `stat` when you only need the existence check.
 
-Uploads a file from the local filesystem into the sandbox.
+**Returns:** `Promise<boolean>`
 
-| Parameter | Type | Description |
-|---|---|---|
-| `opts.mkdirRecursive` | `boolean` | Create parent directories on the sandbox side if they do not exist. |
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `path` | `string` | Yes | Path to check. |
 
-#### `await sandbox.downloadFile(sandboxPath, localPath, opts?) → string | null`
+```typescript
+if (await sb.exists('/app/config.json')) {
+  // ...
+}
+```
 
-Downloads a file from the sandbox to the local filesystem. Returns the absolute local path on success, or `null` when the sandbox file does not exist.
+### `await sandbox.uploadFile(localPath, sandboxPath, opts?)`
 
-| Parameter | Type | Description |
-|---|---|---|
-| `opts.mkdirRecursive` | `boolean` | Create local parent directories if they do not exist. |
+Use `sandbox.uploadFile()` to upload a file from the local filesystem into the sandbox.
+
+**Returns:** `Promise<void>`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `localPath` | `string` | Yes | Absolute path on the local machine. |
+| `sandboxPath` | `string` | Yes | Destination path inside the sandbox. |
+| `opts.mkdirRecursive` | `boolean` | No | Create parent directories on the sandbox side if they do not exist. |
+
+```typescript
+await sb.uploadFile('/local/model.bin', '/app/model.bin', { mkdirRecursive: true });
+```
+
+### `await sandbox.downloadFile(sandboxPath, localPath, opts?) → string | null`
+
+Use `sandbox.downloadFile()` to download a file from the sandbox to the local filesystem. Returns the absolute local path on success, or `null` when the sandbox file does not exist.
 
 **Returns:** `Promise<string | null>` — `null` if the file does not exist.
 
-#### `await sandbox.downloadFiles(entries) → Map<string, string>`
-
-Downloads multiple files. Returns a `Map` of sandbox path → local path for each file successfully downloaded.
-
-#### `sandbox.domain(port) → string`
-
-Returns the publicly accessible URL for an exposed port.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `sandboxPath` | `string` | Yes | Path to the file inside the sandbox. |
+| `localPath` | `string` | Yes | Destination path on the local machine. |
+| `opts.mkdirRecursive` | `boolean` | No | Create local parent directories if they do not exist. |
 
 ```typescript
-const url = sb.domain(3000); // "https://3000-preview.example.com"
+const dst = await sb.downloadFile('/app/output.json', '/tmp/output.json');
+if (dst !== null) {
+  console.log(`Saved to ${dst}`);
+}
+```
+
+### `await sandbox.downloadFiles(entries) → Map<string, string>`
+
+Use `sandbox.downloadFiles()` to download multiple files in one call. Returns a `Map` of sandbox path → local path for each file successfully downloaded.
+
+**Returns:** `Promise<Map<string, string>>`
+
+```typescript
+const results = await sb.downloadFiles([
+  { sandboxPath: '/app/out.json', localPath: '/tmp/out.json' },
+  { sandboxPath: '/app/log.txt', localPath: '/tmp/log.txt' },
+]);
+```
+
+### `sandbox.domain(port) → string`
+
+Use `sandbox.domain()` to get the publicly accessible URL for an exposed port. The sandbox must be created with this port declared.
+
+**Returns:** `string`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `port` | `number` | Yes | Port number to resolve. |
+
+```typescript
+const url = sb.domain(3000);
+console.log(`App running at ${url}`);
 ```
 
 ---
 
-### Lifecycle
+## Lifecycle
 
-#### `await sandbox.refresh(client)`
+### `await sandbox.refresh(client)`
 
-Re-fetches the sandbox metadata from the server and updates the cached info. Call this before reading `sandbox.status` or `sandbox.expireAt` if you need current values.
+Call `sandbox.refresh()` to re-fetch sandbox metadata from the server and update the cached values. Call this before reading `sandbox.status` or `sandbox.expireAt` if you need current values.
 
-#### `await sandbox.stop(client, opts?)`
+**Returns:** `Promise<void>`
 
-Pauses the sandbox without deleting it. Set `opts.blocking: true` to wait until the sandbox reaches `"stopped"` or `"failed"` status before returning.
+```typescript
+await sb.refresh(client);
+console.log(sb.status);
+```
 
-| Parameter | Type | Description |
-|---|---|---|
-| `opts.blocking` | `boolean` | Poll until the sandbox has stopped. |
-| `opts.pollIntervalMs` | `number` | How often to poll in milliseconds. Defaults to 2000. |
-| `opts.timeoutMs` | `number` | Maximum time to wait in milliseconds. Defaults to 300000. |
+### `await sandbox.stop(client, opts?)`
 
-#### `await sandbox.start(client)`
+Call `sandbox.stop()` to pause the sandbox without deleting it. Set `opts.blocking: true` to wait until the sandbox reaches `"stopped"` or `"failed"` status before returning.
 
-Resumes a stopped sandbox.
+**Returns:** `Promise<void>`
 
-#### `await sandbox.restart(client)`
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `opts.blocking` | `boolean` | No | Poll until the sandbox has stopped. |
+| `opts.pollIntervalMs` | `number` | No | How often to poll in milliseconds. Defaults to `2000`. |
+| `opts.timeoutMs` | `number` | No | Maximum time to wait in milliseconds. Defaults to `300000`. |
 
-Stops and restarts the sandbox.
+```typescript
+await sb.stop(client, { blocking: true });
+```
 
-#### `await sandbox.extend(client, durationMs?)`
+### `await sandbox.start(client)`
 
-Extends the sandbox TTL by `durationMs` milliseconds. Pass `0` to use the server default (12 hours).
+Use `sandbox.start()` to resume a stopped sandbox.
+
+**Returns:** `Promise<void>`
+
+```typescript
+await sb.start(client);
+```
+
+### `await sandbox.restart(client)`
+
+Use `sandbox.restart()` to stop and restart the sandbox.
+
+**Returns:** `Promise<void>`
+
+```typescript
+await sb.restart(client);
+```
+
+### `await sandbox.extend(client, durationMs?)`
+
+Use `sandbox.extend()` to extend the sandbox TTL by `durationMs` milliseconds. Pass `0` to use the server default (12 hours).
+
+**Returns:** `Promise<void>`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `durationMs` | `number` | No | Duration to add in milliseconds. Pass `0` for the server default (12 hours). |
 
 ```typescript
 // Extend by 30 minutes
 await sb.extend(client, 30 * 60 * 1000);
 ```
 
-#### `await sandbox.extendTimeout(client, durationMs?)`
+### `await sandbox.extendTimeout(client, durationMs?)`
 
-Extends the TTL and immediately refreshes the cached info.
+Use `sandbox.extendTimeout()` to extend the TTL and immediately refresh the cached info in one call.
 
-#### `sandbox.status → string`
+**Returns:** `Promise<void>`
 
-Cached status string (`"active"`, `"stopped"`, etc.). Call `refresh` first for a live value.
+```typescript
+await sb.extendTimeout(client, 60 * 60 * 1000); // +1 hour
+```
 
-#### `sandbox.expireAt → string`
+### `await sandbox.update(client, opts)`
 
-Cached expiry timestamp in RFC 3339 format.
+Use `sandbox.update()` to change the sandbox spec, image, or payloads. Changing payloads triggers a sandbox restart.
 
-#### `sandbox.timeout → number`
+**Returns:** `Promise<void>`
 
-Remaining sandbox lifetime in milliseconds based on the cached `expireAt`. Returns `0` if the sandbox has already expired. Call `refresh` first for an accurate value.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `opts.spec` | `Spec` | No | New resource spec. |
+| `opts.image` | `string` | No | New container image tag. |
+| `opts.payloads` | `Payload[]` | No | Replaces all stored payloads and triggers a restart. |
 
-#### `await sandbox.update(client, opts)`
+```typescript
+await sb.update(client, { spec: { cpu: '4', memory: '8Gi' } });
+```
 
-Updates the sandbox spec, image, or payloads. Changing payloads triggers a sandbox restart.
+### `await sandbox.configure(client)`
 
-| Parameter | Type | Description |
-|---|---|---|
-| `opts.spec` | `Spec` | New resource spec. |
-| `opts.image` | `string` | New container image tag. |
-| `opts.payloads` | `Payload[]` | Replaces all stored payloads and triggers a restart. |
+Call `sandbox.configure()` to immediately apply the current configuration to the running pod.
 
-#### `await sandbox.configure(client)`
+**Returns:** `Promise<void>`
 
-Immediately applies the current configuration to the running pod.
+```typescript
+await sb.configure(client);
+```
 
-#### `await sandbox.delete(client)`
+### `await sandbox.delete(client)`
 
-Permanently deletes the sandbox. This cannot be undone.
+Call `sandbox.delete()` to permanently delete the sandbox. This cannot be undone.
 
-#### `sandbox.close()`
+**Returns:** `Promise<void>`
 
-Closes the WebSocket connection. Call this when you are done with the sandbox to free the connection.
+```typescript
+await sb.delete(client);
+```
+
+### `sandbox.close()`
+
+Call `sandbox.close()` to close the WebSocket connection. Call this when you are done with the sandbox to free the connection.
+
+```typescript
+sb.close();
+```
 
 ---
 
