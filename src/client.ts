@@ -12,12 +12,12 @@ const POLL_TIMEOUT_MS  = 180_000;
 export class Client {
   private readonly baseURL: string;
   private readonly token: string;
-  private readonly serviceID: string;
+  private readonly projectID: string;
 
   constructor(opts: ClientOptions) {
     this.baseURL = opts.baseURL.replace(/\/$/, '');
     this.token = opts.token ?? '';
-    this.serviceID = opts.serviceID ?? '';
+    this.projectID = opts.projectID ?? '';
   }
 
   async create(opts: CreateOptions): Promise<Sandbox> {
@@ -26,8 +26,9 @@ export class Client {
     return await this._connect(active, opts);
   }
 
-  async attach(sandboxId: string, token?: string, serviceID?: string): Promise<Sandbox> {
-    const opts: CreateOptions = { user_id: '', token, service_id: serviceID };
+  async attach(sandboxId: string): Promise<Sandbox> {
+    /** Attach to an existing sandbox. Auth uses the client-level token. */
+    const opts: CreateOptions = { user_id: '' };
     const info = await this._getSandbox(sandboxId, opts);
     return await this._connect(info, opts);
   }
@@ -86,8 +87,8 @@ export class Client {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     const token = opts.token ?? this.token;
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    const sid = opts.service_id ?? this.serviceID;
-    if (sid) headers['X-Service-ID'] = sid;
+    const sid = opts.project_id ?? this.projectID;
+    if (sid) headers['X-Project-ID'] = sid;
     return headers;
   }
 
@@ -144,8 +145,8 @@ export class Client {
     const headers: Record<string, string> = {};
     const token = opts.token ?? this.token;
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    const sid = opts.service_id ?? this.serviceID;
-    if (sid) headers['X-Service-ID'] = sid;
+    const sid = opts.project_id ?? this.projectID;
+    if (sid) headers['X-Project-ID'] = sid;
 
     // Pass token as a WebSocket subprotocol so browsers can authenticate.
     // Browsers cannot set custom HTTP headers during WebSocket handshake;
@@ -154,7 +155,7 @@ export class Client {
 
     const ws = new WebSocket(url, protocols, { headers });
     return new Promise<Sandbox>((resolve, reject) => {
-      ws.once('open', () => resolve(new Sandbox(info, ws, opts.env ?? {})));
+      ws.once('open', () => resolve(new Sandbox(info, ws, this, opts.env ?? {})));
       ws.once('error', (err) => reject(err));
     });
   }

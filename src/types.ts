@@ -36,8 +36,8 @@ export interface CreateOptions {
   ttl_hours?: number;
   /** Bearer token — not serialised to JSON */
   token?: string;
-  /** X-Service-ID — not serialised to JSON */
-  service_id?: string;
+  /** X-Project-ID — not serialised to JSON */
+  project_id?: string;
   /** Default env variables inherited by all commands — not serialised to JSON */
   env?: Record<string, string>;
 }
@@ -54,16 +54,11 @@ export interface RunOptions {
   stdout?: NodeJS.WritableStream;
   /** When set, stderr chunks are written here as they arrive. runCommand() uses streaming internally. */
   stderr?: NodeJS.WritableStream;
-  /**
-   * When true, runCommand() returns a Command immediately (background/detached execution).
-   * Use command.wait() to get the final result.
-   */
-  detached?: boolean;
 }
 
-/** Options for Sandbox.downloadFile. */
-export interface DownloadOptions {
-  /** Create local parent directories if they don't exist. */
+/** Options for file transfer operations (downloadFile / uploadFile). */
+export interface FileOptions {
+  /** Create parent directories if they don't exist (local for downloads, sandbox for uploads). */
   mkdirRecursive?: boolean;
 }
 
@@ -155,7 +150,7 @@ export interface FileInfo {
 export interface ClientOptions {
   baseURL: string;
   token?: string;
-  serviceID?: string;
+  projectID?: string;
 }
 
 export interface ListOptions {

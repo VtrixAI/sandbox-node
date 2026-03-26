@@ -1,5 +1,6 @@
 export { Client } from './client';
-export { Sandbox, Command, CommandFinished } from './sandbox';
+export { Sandbox } from './sandbox';
+export { Command, CommandFinished } from './command';
 export type {
   ClientOptions,
   CreateOptions,
@@ -10,7 +11,7 @@ export type {
   ExecEvent,
   LogEvent,
   WriteFileEntry,
-  DownloadOptions,
+  FileOptions,
   DownloadEntry,
   StopOptions,
   FileEntry,
