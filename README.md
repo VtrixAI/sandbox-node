@@ -18,7 +18,7 @@ import { Client } from '@vtrixai/sandbox';
 const client = new Client({
   baseURL:   'http://your-hermes-host:8080',
   token:     'your-token',
-  serviceID: 'your-service-id',
+  projectID: 'your-project-id',
 });
 
 // Create a sandbox and wait for it to become active
@@ -53,13 +53,13 @@ Creates a new client. The client is reusable and safe for concurrent use across 
 |---|---|---|---|
 | `baseURL` | `string` | Yes | Hermes gateway URL (e.g. `http://host:8080`). |
 | `token` | `string` | No | Bearer token for authentication. |
-| `serviceID` | `string` | No | Value sent as `X-Service-ID` header. |
+| `projectID` | `string` | No | Value sent as `X-Project-ID` header. |
 
 ```typescript
 const client = new Client({
   baseURL:   'http://your-hermes-host:8080',
   token:     'your-token',
-  serviceID: 'your-service-id',
+  projectID: 'your-project-id',
 });
 ```
 
@@ -87,17 +87,15 @@ const sb = await client.create({
 });
 ```
 
-### `await client.attach(sandboxId, token?, serviceID?) → Sandbox`
+### `await client.attach(sandboxId) → Sandbox`
 
-Use `client.attach()` to connect to an existing sandbox without creating a new one. Use this to resume a session after a restart or to connect from a different process. Omit `token` and `serviceID` to fall back to the client-level values.
+Use `client.attach()` to connect to an existing sandbox without creating a new one. Use this to resume a session after a restart or to connect from a different process. Auth uses the client-level token and project ID.
 
 **Returns:** `Promise<Sandbox>`
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sandboxId` | `string` | Yes | ID of the sandbox to connect to. |
-| `token` | `string` | No | Override the client-level token for this connection. |
-| `serviceID` | `string` | No | Override the client-level service ID for this connection. |
 
 ```typescript
 const sb = await client.attach('sandbox-id-abc');
@@ -150,9 +148,19 @@ A `Sandbox` instance gives you full control over an isolated environment. You re
 
 ### Properties
 
+#### `sandbox.createdAt → Date`
+
+The `createdAt` property returns the sandbox creation time parsed from `info.created_at`. Returns a new `Date` object on each access.
+
+**Returns:** `Date`
+
+```typescript
+console.log(sb.createdAt.toISOString());
+```
+
 #### `sandbox.status → string`
 
-The `status` property reports the cached lifecycle state of the sandbox. Call `sandbox.refresh(client)` first if you need a live value.
+The `status` property reports the cached lifecycle state of the sandbox. Call `await sandbox.refresh()` first if you need a live value.
 
 **Returns:** `string` — `"active"`, `"stopped"`, `"destroying"`, etc.
 
@@ -162,7 +170,7 @@ console.log(sb.status);
 
 #### `sandbox.expireAt → string`
 
-The `expireAt` property returns the cached expiry timestamp. Call `sandbox.refresh(client)` first for an accurate value.
+The `expireAt` property returns the cached expiry timestamp. Call `await sandbox.refresh()` first for an accurate value.
 
 **Returns:** `string` — RFC 3339 timestamp.
 
@@ -172,13 +180,13 @@ console.log(sb.expireAt);
 
 #### `sandbox.timeout → number`
 
-The `timeout` property returns the remaining sandbox lifetime in milliseconds based on the cached `expireAt`. Returns `0` if the sandbox has already expired. Compare against upcoming commands and call `sandbox.extendTimeout()` if the window is too short.
+The `timeout` property returns the remaining sandbox lifetime in milliseconds based on the cached `expireAt`. Returns `0` if the sandbox has already expired.
 
 **Returns:** `number` — milliseconds remaining; `0` if expired.
 
 ```typescript
 if (sb.timeout < 60_000) {
-  await sb.extendTimeout(client, 30 * 60 * 1000);
+  await sb.extend(1); // extend by 1 hour
 }
 ```
 
@@ -186,13 +194,13 @@ if (sb.timeout < 60_000) {
 
 ## Running Commands
 
-### `await sandbox.runCommand(cmd, args?, opts?) → CommandFinished | Command`
+### `await sandbox.runCommand(cmd, args?, opts?) → CommandFinished`
 
-`sandbox.runCommand()` executes a command inside the sandbox. By default it blocks until the command finishes and returns a `CommandFinished` result. Set `opts.detached: true` to return immediately with a `Command` handle for background execution.
+`sandbox.runCommand()` executes a command inside the sandbox and blocks until it finishes.
 
 Set `opts.stdout` or `opts.stderr` to receive output in real time while still blocking — useful for progress logging.
 
-**Returns:** `Promise<CommandFinished>` when `detached` is `false` (default); `Promise<Command>` when `detached` is `true`.
+**Returns:** `Promise<CommandFinished>`
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -205,21 +213,26 @@ Set `opts.stdout` or `opts.stderr` to receive output in real time while still bl
 | `opts.stdin` | `string` | No | Data written to the command's stdin before reading output. |
 | `opts.stdout` | `NodeJS.WritableStream` | No | Receives stdout chunks as they arrive. |
 | `opts.stderr` | `NodeJS.WritableStream` | No | Receives stderr chunks as they arrive. |
-| `opts.detached` | `boolean` | No | Return a `Command` immediately without waiting for completion. |
 
 ```typescript
-// Blocking with live output
 const result = await sb.runCommand('npm install', undefined, {
   working_dir: '/app',
   stdout: process.stdout,
   stderr: process.stderr,
 });
 console.log(`exit_code=${result.exitCode}`);
+```
 
-// Detached (background) execution
-const cmd = await sb.runCommand('node server.js', undefined, {
+### `await sandbox.runCommandDetached(cmd, args?, opts?) → Command`
+
+Use `sandbox.runCommandDetached()` to start a command in the background and return immediately. Use this for long-running processes such as servers where you want to do other work while the command runs, then call `cmd.wait()` when you need the result.
+
+**Returns:** `Promise<Command>`
+
+```typescript
+const cmd = await sb.runCommandDetached('node server.js', undefined, {
   working_dir: '/app',
-  detached: true,
+  env: { PORT: '8080' },
 });
 // ... do other work ...
 const finished = await cmd.wait();
@@ -263,7 +276,7 @@ for await (const ev of sb.execLogs(cmd.cmdId)) {
 
 ### `sandbox.getCommand(cmdId) → Command`
 
-Use `sandbox.getCommand()` to reconstruct a `Command` handle from a known `cmdId`. Use this to reconnect to a command started in a previous call without going through `runCommand` again.
+Use `sandbox.getCommand()` to reconstruct a `Command` handle from a known `cmdId`. Use this to reconnect to a command started in a previous call without going through `runCommandDetached` again.
 
 **Returns:** `Command`
 
@@ -295,7 +308,7 @@ await sb.kill(cmd.cmdId, 'SIGTERM');
 
 ## Command
 
-A `Command` represents a running or completed process. You receive one from `sandbox.runCommand({ detached: true })` or `sandbox.getCommand()`. `CommandFinished` extends `Command` and adds `exitCode` and `output`.
+A `Command` represents a running or completed process. You receive one from `sandbox.runCommandDetached()` or `sandbox.getCommand()`. `CommandFinished` extends `Command` and adds `exitCode` and `output`.
 
 ### Properties
 
@@ -309,12 +322,12 @@ A `Command` represents a running or completed process. You receive one from `san
 
 ### `await command.wait() → CommandFinished`
 
-Use `command.wait()` to block until a detached command finishes and get the resulting `CommandFinished` object. This method is essential after `runCommand({ detached: true })` when you need the exit code or output.
+Use `command.wait()` to block until a detached command finishes and get the resulting `CommandFinished` object.
 
 **Returns:** `Promise<CommandFinished>` — `exitCode`, `output`, `cmdId`.
 
 ```typescript
-const cmd = await sb.runCommand('node server.js', undefined, { detached: true });
+const cmd = await sb.runCommandDetached('node server.js');
 // ... do other work ...
 const result = await cmd.wait();
 if (result.exitCode !== 0) {
@@ -337,7 +350,7 @@ for await (const ev of cmd.logs()) {
 
 ### `await command.stdout() → string`
 
-Use `command.stdout()` to collect the full standard output as a string. Call this after `wait()` when you need to parse the complete output rather than process it line by line.
+Use `command.stdout()` to collect the full standard output as a string.
 
 **Returns:** `Promise<string>`
 
@@ -348,7 +361,7 @@ const data = JSON.parse(output);
 
 ### `await command.stderr() → string`
 
-Use `command.stderr()` to collect the full standard error output as a string. Combine with `exitCode` to build user-friendly error messages.
+Use `command.stderr()` to collect the full standard error output as a string.
 
 **Returns:** `Promise<string>`
 
@@ -359,7 +372,7 @@ if (errors) console.error('Command errors:', errors);
 
 ### `await command.collectOutput(stream) → string`
 
-Use `command.collectOutput()` to collect stdout, stderr, or both as a single string. Choose `"both"` for combined output, or specify the stream you need to process separately.
+Use `command.collectOutput()` to collect stdout, stderr, or both as a single string.
 
 **Returns:** `Promise<string>`
 
@@ -602,11 +615,11 @@ if (dst !== null) {
 }
 ```
 
-### `await sandbox.downloadFiles(entries) → Map<string, string>`
+### `await sandbox.downloadFiles(entries) → Map<string, string | null>`
 
-Use `sandbox.downloadFiles()` to download multiple files in one call. Returns a `Map` of sandbox path → local path for each file successfully downloaded.
+Use `sandbox.downloadFiles()` to download multiple files in one call (up to 8 concurrent). Returns a `Map` of sandbox path → local path for each file.
 
-**Returns:** `Promise<Map<string, string>>`
+**Returns:** `Promise<Map<string, string | null>>`
 
 ```typescript
 const results = await sb.downloadFiles([
@@ -634,18 +647,18 @@ console.log(`App running at ${url}`);
 
 ## Lifecycle
 
-### `await sandbox.refresh(client)`
+### `await sandbox.refresh()`
 
 Call `sandbox.refresh()` to re-fetch sandbox metadata from the server and update the cached values. Call this before reading `sandbox.status` or `sandbox.expireAt` if you need current values.
 
 **Returns:** `Promise<void>`
 
 ```typescript
-await sb.refresh(client);
+await sb.refresh();
 console.log(sb.status);
 ```
 
-### `await sandbox.stop(client, opts?)`
+### `await sandbox.stop(opts?)`
 
 Call `sandbox.stop()` to pause the sandbox without deleting it. Set `opts.blocking: true` to wait until the sandbox reaches `"stopped"` or `"failed"` status before returning.
 
@@ -658,55 +671,54 @@ Call `sandbox.stop()` to pause the sandbox without deleting it. Set `opts.blocki
 | `opts.timeoutMs` | `number` | No | Maximum time to wait in milliseconds. Defaults to `300000`. |
 
 ```typescript
-await sb.stop(client, { blocking: true });
+await sb.stop({ blocking: true });
 ```
 
-### `await sandbox.start(client)`
+### `await sandbox.start()`
 
 Use `sandbox.start()` to resume a stopped sandbox.
 
 **Returns:** `Promise<void>`
 
 ```typescript
-await sb.start(client);
+await sb.start();
 ```
 
-### `await sandbox.restart(client)`
+### `await sandbox.restart()`
 
 Use `sandbox.restart()` to stop and restart the sandbox.
 
 **Returns:** `Promise<void>`
 
 ```typescript
-await sb.restart(client);
+await sb.restart();
 ```
 
-### `await sandbox.extend(client, durationMs?)`
+### `await sandbox.extend(hours?)`
 
-Use `sandbox.extend()` to extend the sandbox TTL by `durationMs` milliseconds. Pass `0` to use the server default (12 hours).
+Use `sandbox.extend()` to extend the sandbox TTL by `hours`. Pass `0` to use the server default (12 hours).
 
 **Returns:** `Promise<void>`
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `durationMs` | `number` | No | Duration to add in milliseconds. Pass `0` for the server default (12 hours). |
+| `hours` | `number` | No | Number of hours to add. Pass `0` for the server default (12 hours). |
 
 ```typescript
-// Extend by 30 minutes
-await sb.extend(client, 30 * 60 * 1000);
+await sb.extend(2); // extend by 2 hours
 ```
 
-### `await sandbox.extendTimeout(client, durationMs?)`
+### `await sandbox.extendTimeout(hours?)`
 
 Use `sandbox.extendTimeout()` to extend the TTL and immediately refresh the cached info in one call.
 
 **Returns:** `Promise<void>`
 
 ```typescript
-await sb.extendTimeout(client, 60 * 60 * 1000); // +1 hour
+await sb.extendTimeout(1); // +1 hour, then refresh
 ```
 
-### `await sandbox.update(client, opts)`
+### `await sandbox.update(opts)`
 
 Use `sandbox.update()` to change the sandbox spec, image, or payloads. Changing payloads triggers a sandbox restart.
 
@@ -719,27 +731,27 @@ Use `sandbox.update()` to change the sandbox spec, image, or payloads. Changing 
 | `opts.payloads` | `Payload[]` | No | Replaces all stored payloads and triggers a restart. |
 
 ```typescript
-await sb.update(client, { spec: { cpu: '4', memory: '8Gi' } });
+await sb.update({ spec: { cpu: '4', memory: '8Gi' } });
 ```
 
-### `await sandbox.configure(client)`
+### `await sandbox.configure(payloads?)`
 
-Call `sandbox.configure()` to immediately apply the current configuration to the running pod.
+Call `sandbox.configure()` to immediately apply the current configuration to the running pod. Optionally override the stored payloads for this apply only.
 
 **Returns:** `Promise<void>`
 
 ```typescript
-await sb.configure(client);
+await sb.configure();
 ```
 
-### `await sandbox.delete(client)`
+### `await sandbox.delete()`
 
 Call `sandbox.delete()` to permanently delete the sandbox. This cannot be undone.
 
 **Returns:** `Promise<void>`
 
 ```typescript
-await sb.delete(client);
+await sb.delete();
 ```
 
 ### `sandbox.close()`

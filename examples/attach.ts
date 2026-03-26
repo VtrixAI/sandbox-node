@@ -15,7 +15,7 @@ async function main() {
   const client = new Client({
     baseURL: 'http://localhost:8080',
     token: 'your-token',
-    serviceID: 'seaclaw',
+    projectID: 'seaclaw',
   });
 
   console.log(`Attaching to: ${sandboxId}`);

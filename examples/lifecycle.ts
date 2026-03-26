@@ -9,7 +9,7 @@ async function main() {
   const client = new Client({
     baseURL: 'http://localhost:8080',
     token: 'your-token',
-    serviceID: 'seaclaw',
+    projectID: 'seaclaw',
   });
 
   // ── 列表查询 ──────────────────────────────────────────
@@ -31,39 +31,39 @@ async function main() {
   const info = await client.get(sb.info.id);
   console.log(`Get: status=${info.status}, ip=${info.ip}`);
 
-  // ── 延期 (12h = 43_200_000 ms) ────────────────────────
-  await sb.extend(client, 43_200_000);
+  // ── 延期 12h ──────────────────────────────────────────
+  await sb.extend(12);
   console.log('Extended TTL by 12h');
 
   // ── 更新配置 ──────────────────────────────────────────
-  await sb.update(client, {
+  await sb.update({
     payloads: [{ api: '/api/v1/env', body: { LOG_LEVEL: 'debug' } }],
   } satisfies UpdateOptions);
   console.log('Updated payloads');
 
   // ── 立即应用配置 ──────────────────────────────────────
-  await sb.configure(client);
+  await sb.configure();
   console.log('Configured');
 
   // ── 刷新本地 info ─────────────────────────────────────
-  await sb.refresh(client);
+  await sb.refresh();
   console.log(`Refreshed: status=${sb.info.status}`);
 
   // ── 停止 / 启动 ───────────────────────────────────────
-  await sb.stop(client);
+  await sb.stop();
   console.log('Stopped');
   await sleep(2000);
 
-  await sb.start(client);
+  await sb.start();
   console.log('Started');
 
   // ── 重启 ──────────────────────────────────────────────
-  await sb.restart(client);
+  await sb.restart();
   console.log('Restarted');
 
   // ── 删除 ──────────────────────────────────────────────
   sb.close();
-  await sb.delete(client);
+  await sb.delete();
   console.log(`Deleted ${sb.info.id}`);
 }
 

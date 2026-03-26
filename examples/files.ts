@@ -3,14 +3,14 @@
  *
  * Run: npx ts-node examples/files.ts
  */
-import * as fs from 'fs';
+import * as fsp from 'fs/promises';
 import { Client, WriteFileEntry } from '../src';
 
 async function main() {
   const client = new Client({
     baseURL: 'http://localhost:8080',
     token: 'your-token',
-    serviceID: 'seaclaw',
+    projectID: 'seaclaw',
   });
 
   const sb = await client.create({ user_id: 'user-123' });
@@ -81,7 +81,7 @@ async function main() {
 
   // ── uploadFile / downloadFile ─────────────────────────
   const localSrc = '/tmp/sdk_upload_test.txt';
-  fs.writeFileSync(localSrc, 'uploaded content\n');
+  await fsp.writeFile(localSrc, 'uploaded content\n');
 
   await sb.uploadFile(localSrc, '/tmp/uploaded.txt');
   console.log('UploadFile done');
@@ -89,7 +89,8 @@ async function main() {
   const localDst = '/tmp/sdk_download_test.txt';
   const dst = await sb.downloadFile('/tmp/uploaded.txt', localDst);
   console.log(`DownloadFile → ${dst}`);
-  console.log(`Downloaded content: ${fs.readFileSync(dst!).toString().trim()}`);
+  const downloaded = await fsp.readFile(dst!);
+  console.log(`Downloaded content: ${downloaded.toString().trim()}`);
 
   // 下载不存在的文件 → null
   const missingDst = await sb.downloadFile('/tmp/nonexistent.txt', '/tmp/never.txt');

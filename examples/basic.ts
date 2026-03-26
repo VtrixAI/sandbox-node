@@ -9,7 +9,7 @@ async function main() {
   const client = new Client({
     baseURL: 'http://localhost:8080',
     token: 'your-token',
-    serviceID: 'seaclaw',
+    projectID: 'seaclaw',
   });
 
   console.log('Creating sandbox...');
@@ -30,25 +30,23 @@ async function main() {
   console.log(`ls -la /tmp:\n${result2.output.trim()}`);
 
   // detached 命令：立即返回 Command，稍后 wait()
-  const cmd = await sb.runCommand(
+  const cmd = await sb.runCommandDetached(
     'for i in $(seq 1 3); do echo bg_$i; sleep 0.3; done',
-    undefined,
-    { detached: true },
-  ) as Awaited<ReturnType<typeof sb.runCommand>> & { wait: Function };
-  console.log(`Detached cmdId=${(cmd as any).cmdId}  pid=${(cmd as any).pid}`);
+  );
+  console.log(`Detached cmdId=${cmd.cmdId}  pid=${cmd.pid}`);
 
   // wait() 等待结束，获取 CommandFinished
-  const finished = await (cmd as any).wait();
+  const finished = await cmd.wait();
   console.log(`Detached done: exit_code=${finished.exitCode}`);
   console.log(`Detached output:\n${finished.output.trim()}`);
 
   // getCommand：通过 cmdId 重新拿到 Command 对象
-  const cmd2 = sb.getCommand((cmd as any).cmdId);
+  const cmd2 = sb.getCommand(cmd.cmdId);
   const stdoutText = await cmd2.stdout();
   console.log(`Re-fetched stdout: ${stdoutText.trim()}`);
 
   // kill 示例（先启动一个 sleep，再 kill 它）
-  const sleeper = await sb.runCommand('sleep 60', undefined, { detached: true }) as any;
+  const sleeper = await sb.runCommandDetached('sleep 60');
   await sb.kill(sleeper.cmdId, 'SIGKILL');
   console.log(`Killed sleep, cmdId=${sleeper.cmdId}`);
 
