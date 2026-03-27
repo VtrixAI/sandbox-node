@@ -26,3 +26,4 @@ export type {
   UpdateOptions,
 } from './types';
 export { SandboxError } from './types';
+export type { PoolStatus, RollingStatus, RollingStartOptions } from './admin';

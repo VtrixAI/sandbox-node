@@ -5,6 +5,7 @@ import {
   ListOptions, ListResult, Pagination, UpdateOptions,
 } from './types';
 import { Sandbox } from './sandbox';
+import { PoolStatus, RollingStatus, RollingStartOptions } from './admin';
 
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS  = 180_000;
@@ -31,6 +32,47 @@ export class Client {
     const opts: CreateOptions = { user_id: '' };
     const info = await this._getSandbox(sandboxId, opts);
     return await this._connect(info, opts);
+  }
+
+  // ── Admin ─────────────────────────────────────────────────
+
+  async poolStatus(): Promise<PoolStatus> {
+    const resp = await fetch(`${this.baseURL}/admin/pool/status`, {
+      headers: this._authHeaders({ user_id: '' }),
+    });
+    const env = await resp.json() as AtlasEnvelope<PoolStatus>;
+    checkAtlas(env);
+    return env.data;
+  }
+
+  async rollingStart(opts: RollingStartOptions): Promise<RollingStatus> {
+    const resp = await fetch(`${this.baseURL}/admin/rolling/start`, {
+      method: 'POST',
+      headers: this._authHeaders({ user_id: '' }),
+      body: JSON.stringify({ image: opts.image }),
+    });
+    const env = await resp.json() as AtlasEnvelope<RollingStatus>;
+    checkAtlas(env);
+    return env.data;
+  }
+
+  async rollingStatus(): Promise<RollingStatus> {
+    const resp = await fetch(`${this.baseURL}/admin/rolling/status`, {
+      headers: this._authHeaders({ user_id: '' }),
+    });
+    const env = await resp.json() as AtlasEnvelope<RollingStatus>;
+    checkAtlas(env);
+    return env.data;
+  }
+
+  async rollingCancel(): Promise<RollingStatus> {
+    const resp = await fetch(`${this.baseURL}/admin/rolling/cancel`, {
+      method: 'POST',
+      headers: this._authHeaders({ user_id: '' }),
+    });
+    const env = await resp.json() as AtlasEnvelope<RollingStatus>;
+    checkAtlas(env);
+    return env.data;
   }
 
   // ── Lifecycle ────────────────────────────────────────────
