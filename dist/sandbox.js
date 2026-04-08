@@ -273,6 +273,46 @@ export class Sandbox {
             throw parseAPIError(res.status, err);
         }
     }
+    /**
+     * Return a short-lived signed URL for directly downloading a file from the sandbox.
+     */
+    async downloadUrl(path, opts) {
+        const expires = opts?.expires ?? 300;
+        let url = `${this.config.baseUrl}/api/v1/sandboxes/${this.sandboxId}/exec/files/download-url?path=${encodeURIComponent(path)}&expires=${expires}`;
+        if (opts?.user)
+            url += `&username=${encodeURIComponent(opts.user)}`;
+        const res = await fetch(url, {
+            method: 'GET',
+            headers: mgmtHeaders(this.config.apiKey),
+            signal: AbortSignal.timeout(this.config.requestTimeoutMs),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw parseAPIError(res.status, err);
+        }
+        const data = await res.json();
+        return data.url;
+    }
+    /**
+     * Return a short-lived signed URL for directly uploading a file into the sandbox.
+     */
+    async uploadUrl(path, opts) {
+        const expires = opts?.expires ?? 300;
+        let url = `${this.config.baseUrl}/api/v1/sandboxes/${this.sandboxId}/exec/files/upload-url?path=${encodeURIComponent(path)}&expires=${expires}`;
+        if (opts?.user)
+            url += `&username=${encodeURIComponent(opts.user)}`;
+        const res = await fetch(url, {
+            method: 'GET',
+            headers: mgmtHeaders(this.config.apiKey),
+            signal: AbortSignal.timeout(this.config.requestTimeoutMs),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw parseAPIError(res.status, err);
+        }
+        const data = await res.json();
+        return data.url;
+    }
     /** List all sandboxes. */
     static async list(opts) {
         const apiKey = resolveApiKey(opts);
@@ -289,6 +329,53 @@ export class Sandbox {
         const raw = await res.json();
         const items = Array.isArray(raw) ? raw : raw.sandboxes ?? [];
         return items.map((s) => mapSandboxInfo(s));
+    }
+    /** Static: set the sandbox lifetime timeout (in seconds). */
+    static async setTimeout(sandboxId, timeoutSeconds, opts) {
+        const apiKey = resolveApiKey(opts);
+        const baseUrl = resolveBaseUrl(opts);
+        const res = await fetch(`${baseUrl}/api/v1/sandboxes/${sandboxId}/timeout`, {
+            method: 'POST',
+            headers: mgmtHeaders(apiKey),
+            body: JSON.stringify({ timeout: timeoutSeconds }),
+            signal: AbortSignal.timeout(60_000),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw parseAPIError(res.status, err);
+        }
+    }
+    /** Static: get sandbox info by ID. */
+    static async getInfo(sandboxId, opts) {
+        const apiKey = resolveApiKey(opts);
+        const baseUrl = resolveBaseUrl(opts);
+        const res = await fetch(`${baseUrl}/api/v1/sandboxes/${sandboxId}`, {
+            method: 'GET',
+            headers: mgmtHeaders(apiKey),
+            signal: AbortSignal.timeout(60_000),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw parseAPIError(res.status, err);
+        }
+        const raw = await res.json();
+        return mapSandboxInfo(raw);
+    }
+    /** Static: get CPU and memory metrics for a sandbox by ID. */
+    static async getMetrics(sandboxId, opts) {
+        const apiKey = resolveApiKey(opts);
+        const baseUrl = resolveBaseUrl(opts);
+        const res = await fetch(`${baseUrl}/api/v1/sandboxes/${sandboxId}/exec/metrics`, {
+            method: 'GET',
+            headers: mgmtHeaders(apiKey),
+            signal: AbortSignal.timeout(60_000),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw parseAPIError(res.status, err);
+        }
+        const raw = await res.json();
+        return { cpuUsedPct: raw.cpu_used_pct ?? 0, memUsedMiB: raw.mem_used_mib ?? 0 };
     }
     /**
      * Get the host used for proxied access to a specific port inside the sandbox.

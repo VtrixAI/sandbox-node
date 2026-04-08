@@ -45,8 +45,31 @@ export declare class Sandbox {
      * Pause (snapshot) the sandbox. Resume later with Sandbox.connect().
      */
     betaPause(): Promise<void>;
+    /**
+     * Return a short-lived signed URL for directly downloading a file from the sandbox.
+     */
+    downloadUrl(path: string, opts?: {
+        expires?: number;
+        user?: string;
+    }): Promise<string>;
+    /**
+     * Return a short-lived signed URL for directly uploading a file into the sandbox.
+     */
+    uploadUrl(path: string, opts?: {
+        expires?: number;
+        user?: string;
+    }): Promise<string>;
     /** List all sandboxes. */
     static list(opts?: Pick<SandboxOpts, 'apiKey' | 'baseUrl'>): Promise<SandboxInfo[]>;
+    /** Static: set the sandbox lifetime timeout (in seconds). */
+    static setTimeout(sandboxId: string, timeoutSeconds: number, opts?: Pick<SandboxOpts, 'apiKey' | 'baseUrl'>): Promise<void>;
+    /** Static: get sandbox info by ID. */
+    static getInfo(sandboxId: string, opts?: Pick<SandboxOpts, 'apiKey' | 'baseUrl'>): Promise<SandboxInfo>;
+    /** Static: get CPU and memory metrics for a sandbox by ID. */
+    static getMetrics(sandboxId: string, opts?: Pick<SandboxOpts, 'apiKey' | 'baseUrl'>): Promise<{
+        cpuUsedPct: number;
+        memUsedMiB: number;
+    }>;
     /**
      * Get the host used for proxied access to a specific port inside the sandbox.
      */
