@@ -225,7 +225,7 @@ export class Sandbox {
      * Get current CPU and memory usage for the sandbox.
      */
     async getMetrics() {
-        const res = await fetch(`${this.config.baseUrl}/api/v1/sandboxes/${this.sandboxId}/metrics`, {
+        const res = await fetch(`${this.config.baseUrl}/api/v1/sandboxes/${this.sandboxId}/exec/metrics`, {
             method: 'GET',
             headers: mgmtHeaders(this.config.apiKey),
             signal: AbortSignal.timeout(this.config.requestTimeoutMs),
@@ -235,7 +235,7 @@ export class Sandbox {
             throw parseAPIError(res.status, err);
         }
         const raw = await res.json();
-        return { cpuUsedPct: raw.cpuUsedPct ?? 0, memUsedMiB: raw.memUsedMiB ?? 0 };
+        return { cpuUsedPct: raw.cpu_used_pct ?? 0, memUsedMiB: raw.mem_used_mib ?? 0 };
     }
     /**
      * Resize the sandbox disk to sizeMb megabytes.
