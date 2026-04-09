@@ -280,3 +280,25 @@ describe('Commands disconnect', () => {
     expect(await cmd.kill(pid)).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// handle.wait() onStdout / onStderr callbacks
+// ---------------------------------------------------------------------------
+
+describe('Commands wait callbacks', () => {
+  it('onStdout callback receives stdout lines', async () => {
+    const cmd = commands();
+    const handle = await cmd.run("echo 'wait_cb_stdout'", { background: true });
+    const lines: string[] = [];
+    await handle.wait({ onStdout: (d) => lines.push(d) }).catch(() => {});
+    expect(lines.some((l) => l.includes('wait_cb_stdout'))).toBe(true);
+  });
+
+  it('onStderr callback receives stderr lines', async () => {
+    const cmd = commands();
+    const handle = await cmd.run("echo 'wait_cb_stderr' >&2", { background: true });
+    const lines: string[] = [];
+    await handle.wait({ onStderr: (d) => lines.push(d) }).catch(() => {});
+    expect(lines.some((l) => l.includes('wait_cb_stderr'))).toBe(true);
+  });
+});

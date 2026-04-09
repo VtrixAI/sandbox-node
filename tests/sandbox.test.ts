@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { Sandbox } from '../src/sandbox.js';
+import { Sandbox } from '../dist/sandbox.js';
 import { makeConfig, TEST_SANDBOX_ID, HERMES_ADDR } from './setup.js';
 
 const needsAtlas = !!process.env['ATLAS_BASE_URL'];
@@ -137,6 +137,46 @@ describe.skipIf(!needsAtlas)('Sandbox Atlas methods', () => {
       const url = await sb.uploadUrl('/tmp/up_test_node.txt');
       expect(url).toBeTruthy();
       expect(url).toContain('signature');
+    } finally {
+      await sb.kill();
+    }
+  });
+
+  it('resizeDisk does not throw', async () => {
+    const sb = await Sandbox.create(atlasOpts);
+    try {
+      await sb.resizeDisk(2048);
+    } finally {
+      await sb.kill();
+    }
+  });
+
+  it('static setTimeout does not throw', async () => {
+    const sb = await Sandbox.create(atlasOpts);
+    try {
+      await Sandbox.setTimeout(sb.sandboxId, 120, atlasOpts);
+    } finally {
+      await sb.kill();
+    }
+  });
+
+  it('static getInfo returns sandboxId and state', async () => {
+    const sb = await Sandbox.create(atlasOpts);
+    try {
+      const info = await Sandbox.getInfo(sb.sandboxId, atlasOpts);
+      expect(info.sandboxId).toBe(sb.sandboxId);
+      expect(info.state).toBeTruthy();
+    } finally {
+      await sb.kill();
+    }
+  });
+
+  it('static getMetrics returns cpu and mem fields', async () => {
+    const sb = await Sandbox.create(atlasOpts);
+    try {
+      const metrics = await Sandbox.getMetrics(sb.sandboxId, atlasOpts);
+      expect(typeof metrics.cpuUsedPct).toBe('number');
+      expect(typeof metrics.memUsedMiB).toBe('number');
     } finally {
       await sb.kill();
     }

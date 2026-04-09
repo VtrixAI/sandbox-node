@@ -180,6 +180,49 @@ describe('Filesystem edit', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Read stream format
+// ---------------------------------------------------------------------------
+
+describe('Filesystem read stream', () => {
+  it('read with format stream returns ReadableStream', async () => {
+    const p = path_('stream.txt');
+    const content = 'stream content check';
+    await fs.write(p, content);
+    const stream = await fs.read(p, { format: 'stream' });
+    expect(stream).toBeInstanceOf(ReadableStream);
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    const got = new TextDecoder().decode(
+      chunks.reduce((a, b) => { const c = new Uint8Array(a.length + b.length); c.set(a); c.set(b, a.length); return c; }, new Uint8Array(0))
+    );
+    expect(got).toBe(content);
+  });
+
+  it('read stream large file', async () => {
+    const p = path_('stream_large.bin');
+    const data = new Uint8Array(1024 * 1024); // 1 MiB
+    for (let i = 0; i < data.length; i++) data[i] = i % 256;
+    await fs.write(p, data);
+    const stream = await fs.read(p, { format: 'stream' });
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    let total = 0;
+    for (const c of chunks) total += c.length;
+    expect(total).toBe(data.length);
+  }, 15_000);
+});
+
+// ---------------------------------------------------------------------------
 // Watch
 // ---------------------------------------------------------------------------
 
@@ -224,4 +267,55 @@ describe('Filesystem watch', () => {
 
     expect(count).toBe(countAtStop);
   }, 10_000);
+
+  it('watchDir recursive detects nested file events', async () => {
+    const watchPath = path_('watch_recursive');
+    const subPath = watchPath + '/subdir';
+    await fs.makeDir(subPath);
+
+    const events: unknown[] = [];
+    const handle = await fs.watchDir(watchPath, (e) => events.push(e), { recursive: true });
+
+    await new Promise((r) => setTimeout(r, 200));
+    await fs.write(subPath + '/nested.txt', 'nested trigger');
+    await new Promise((r) => setTimeout(r, 500));
+
+    handle.stop();
+    expect(events.length).toBeGreaterThan(0);
+  }, 10_000);
+
+  it('watchDir onExit callback is called after stop', async () => {
+    const watchPath = path_('watch_on_exit');
+    await fs.makeDir(watchPath);
+
+    let exited = false;
+    const handle = await fs.watchDir(
+      watchPath,
+      () => {},
+      { onExit: () => { exited = true; } },
+    );
+
+    await new Promise((r) => setTimeout(r, 200));
+    // Set stop flag then keep writing to unblock the SSE reader
+    (handle as unknown as { abortController?: { abort: () => void } }).abortController?.abort();
+    // Fallback: just call stop()
+    handle.stop();
+
+    // Give the async cleanup a moment to run onExit
+    await new Promise((r) => setTimeout(r, 500));
+    expect(exited).toBe(true);
+  }, 10_000);
+});
+
+// ---------------------------------------------------------------------------
+// User param
+// ---------------------------------------------------------------------------
+
+describe('Filesystem user param', () => {
+  it('user param does not break absolute path write/read', async () => {
+    const p = path_('user_param.txt');
+    await fs.write(p, 'user param test', { user: 'root' });
+    const got = await fs.read(p, { user: 'root' });
+    expect(got).toBe('user param test');
+  });
 });
