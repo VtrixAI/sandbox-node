@@ -416,11 +416,17 @@ export class Filesystem {
     (async () => {
       try {
         for await (const event of parseSSE(res)) {
-          const fsEvent: FilesystemEvent = {
-            name: event['name'] as string ?? '',
-            type: event['type'] as string ?? '',
-          };
-          await onEvent(fsEvent);
+          // WatchDir SSE format: top-level keys are start/keepalive/filesystem
+          // e.g. {"filesystem":{"name":"file.txt","type":"EVENT_TYPE_CREATE"}}
+          if (event['filesystem'] != null) {
+            const fsRaw = event['filesystem'] as Record<string, unknown>;
+            const fsEvent: FilesystemEvent = {
+              name: fsRaw['name'] as string ?? '',
+              type: fsRaw['type'] as string ?? '',
+            };
+            await onEvent(fsEvent);
+          }
+          // start / keepalive events are silently ignored
         }
         opts?.onExit?.();
       } catch (err) {
