@@ -145,6 +145,10 @@ export class Sandbox {
                 const err = await resumeRes.json().catch(() => ({}));
                 throw parseAPIError(resumeRes.status, err);
             }
+            const resumeData = await resumeRes.json().catch(() => ({}));
+            if (resumeData['envdAccessToken']) {
+                data['envdAccessToken'] = resumeData['envdAccessToken'];
+            }
         }
         const accessToken = data['envdAccessToken'];
         const config = {
@@ -225,7 +229,7 @@ export class Sandbox {
      * Get current CPU and memory usage for the sandbox.
      */
     async getMetrics() {
-        const res = await fetch(`${this.config.baseUrl}/api/v1/sandboxes/${this.sandboxId}/exec/metrics`, {
+        const res = await fetch(`${this.config.baseUrl}/api/v1/sandboxes/${this.sandboxId}/metrics`, {
             method: 'GET',
             headers: mgmtHeaders(this.config.apiKey),
             signal: AbortSignal.timeout(this.config.requestTimeoutMs),
@@ -235,7 +239,7 @@ export class Sandbox {
             throw parseAPIError(res.status, err);
         }
         const raw = await res.json();
-        return { cpuUsedPct: raw.cpu_used_pct ?? 0, memUsedMiB: raw.mem_used_mib ?? 0 };
+        return { cpuUsedPct: raw.cpuUsedPct ?? raw.cpu_used_pct ?? 0, memUsedMiB: raw.memUsedMiB ?? raw.mem_used_mib ?? 0 };
     }
     /**
      * Resize the sandbox disk to sizeMb megabytes.
@@ -266,6 +270,22 @@ export class Sandbox {
         const res = await fetch(`${this.config.baseUrl}/api/v1/sandboxes/${this.sandboxId}/pause`, {
             method: 'POST',
             headers: mgmtHeaders(this.config.apiKey),
+            signal: AbortSignal.timeout(this.config.requestTimeoutMs),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw parseAPIError(res.status, err);
+        }
+    }
+    /**
+     * Extend the sandbox lifetime. duration is seconds to add (max 3600); 0 = server default.
+     */
+    async refresh(duration = 0) {
+        const body = duration > 0 ? { duration } : {};
+        const res = await fetch(`${this.config.baseUrl}/api/v1/sandboxes/${this.sandboxId}/refreshes`, {
+            method: 'POST',
+            headers: mgmtHeaders(this.config.apiKey),
+            body: JSON.stringify(body),
             signal: AbortSignal.timeout(this.config.requestTimeoutMs),
         });
         if (!res.ok) {
@@ -330,6 +350,22 @@ export class Sandbox {
         const items = Array.isArray(raw) ? raw : raw.sandboxes ?? [];
         return items.map((s) => mapSandboxInfo(s));
     }
+    /** Static: get CPU/memory metrics for all running sandboxes. */
+    static async listMetrics(opts) {
+        const apiKey = resolveApiKey(opts);
+        const baseUrl = resolveBaseUrl(opts);
+        const res = await fetch(`${baseUrl}/api/v1/sandboxes/metrics`, {
+            method: 'GET',
+            headers: mgmtHeaders(apiKey),
+            signal: AbortSignal.timeout(60_000),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw parseAPIError(res.status, err);
+        }
+        const raw = await res.json();
+        return Array.isArray(raw) ? raw : [];
+    }
     /** Static: set the sandbox lifetime timeout (in seconds). */
     static async setTimeout(sandboxId, timeoutSeconds, opts) {
         const apiKey = resolveApiKey(opts);
@@ -365,7 +401,7 @@ export class Sandbox {
     static async getMetrics(sandboxId, opts) {
         const apiKey = resolveApiKey(opts);
         const baseUrl = resolveBaseUrl(opts);
-        const res = await fetch(`${baseUrl}/api/v1/sandboxes/${sandboxId}/exec/metrics`, {
+        const res = await fetch(`${baseUrl}/api/v1/sandboxes/${sandboxId}/metrics`, {
             method: 'GET',
             headers: mgmtHeaders(apiKey),
             signal: AbortSignal.timeout(60_000),
@@ -375,7 +411,7 @@ export class Sandbox {
             throw parseAPIError(res.status, err);
         }
         const raw = await res.json();
-        return { cpuUsedPct: raw.cpu_used_pct ?? 0, memUsedMiB: raw.mem_used_mib ?? 0 };
+        return { cpuUsedPct: raw.cpuUsedPct ?? raw.cpu_used_pct ?? 0, memUsedMiB: raw.memUsedMiB ?? raw.mem_used_mib ?? 0 };
     }
     /**
      * Get the host used for proxied access to a specific port inside the sandbox.

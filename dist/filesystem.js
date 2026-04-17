@@ -279,11 +279,15 @@ export class Filesystem {
         (async () => {
             try {
                 for await (const event of parseSSE(res)) {
-                    const fsEvent = {
-                        name: event['name'] ?? '',
-                        type: event['type'] ?? '',
-                    };
-                    await onEvent(fsEvent);
+                    // WatchDir SSE: top-level keys are start/keepalive/filesystem
+                    if (event['filesystem'] != null) {
+                        const fsRaw = event['filesystem'];
+                        const fsEvent = {
+                            name: fsRaw['name'] ?? '',
+                            type: fsRaw['type'] ?? '',
+                        };
+                        await onEvent(fsEvent);
+                    }
                 }
                 opts?.onExit?.();
             }
