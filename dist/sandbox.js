@@ -89,6 +89,8 @@ export class Sandbox {
             metadata: opts?.metadata ?? {},
             envVars: opts?.envs ?? {},
         };
+        if (opts?.workspaceId)
+            body['workspaceId'] = opts.workspaceId;
         const res = await fetch(`${baseUrl}/api/v1/sandboxes`, {
             method: 'POST',
             headers: mgmtHeaders(apiKey),

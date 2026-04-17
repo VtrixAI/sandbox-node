@@ -294,6 +294,10 @@ export class Commands {
         if (opts?.cwd)
             process_['cwd'] = opts.cwd;
         const body = { process: process_ };
+        if (opts?.tag)
+            body['tag'] = opts.tag;
+        if (opts?.stdin === false)
+            body['stdin'] = false;
         if (opts?.timeoutMs != null && opts.timeoutMs !== 0)
             body['timeout'] = Math.floor(opts.timeoutMs / 1000);
         const res = await fetch(`${this.config.envdUrl}/process.Process/Start`, {
@@ -478,6 +482,37 @@ export class Commands {
             process: { tag },
             input: { stdin: encodeBase64(data) },
         }, this.rpcHeaders, this.abortSignal(opts?.requestTimeoutMs));
+    }
+    /**
+     * Fetch structured output for a completed process by cmdId.
+     * Call after receiving the 'end' SSE event. Returns {exitCode, stdout, stderr, startedAtUnix}.
+     */
+    async getResult(cmdId, opts) {
+        return connectRPC(this.config.envdUrl, 'process.Process/GetResult', { cmdId }, this.rpcHeaders, this.abortSignal(opts?.requestTimeoutMs));
+    }
+    /**
+     * Execute a command synchronously via the v2 agent-friendly API (POST /v2/run).
+     * No Connect header required. Returns {stdout, stderr, exit_code, duration_ms, error?}.
+     */
+    async runV2(cmd, opts) {
+        const body = { cmd };
+        if (opts?.cwd)
+            body['cwd'] = opts.cwd;
+        if (opts?.env)
+            body['env'] = opts.env;
+        if (opts?.timeout != null)
+            body['timeout'] = opts.timeout;
+        if (opts?.stdin != null)
+            body['stdin'] = opts.stdin;
+        const res = await fetch(`${this.config.envdUrl}/v2/run`, {
+            method: 'POST',
+            headers: { ...this.rpcHeaders, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: this.abortSignal(opts?.requestTimeoutMs),
+        });
+        const raw = await res.json().catch(() => ({}));
+        if (!res.ok) throw parseAPIError(res.status, raw);
+        return raw;
     }
 }
 // ---------------------------------------------------------------------------

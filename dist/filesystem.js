@@ -246,7 +246,7 @@ export class Filesystem {
         return (raw.files ?? []).map((f) => ({
             name: (f['path'] ?? '').split('/').pop() ?? '',
             path: f['path'] ?? '',
-            type: f['type'],
+            type: 'file',
         }));
     }
     // edit: POST /filesystem.Filesystem/Edit body: {path, oldText, newText}
@@ -301,5 +301,37 @@ export class Filesystem {
             }
         })();
         return new WatchHandle(ac);
+    }
+    /**
+     * Read raw file bytes via the v2 agent-friendly API (GET /v2/file).
+     */
+    async readFileV2(path, opts) {
+        const res = await fetch(`${this.config.envdUrl}/v2/file?path=${encodeURIComponent(path)}`, {
+            method: 'GET',
+            headers: this.headers,
+            signal: this.abortSignal(opts?.requestTimeoutMs),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw parseAPIError(res.status, err);
+        }
+        const buf = await res.arrayBuffer();
+        return new Uint8Array(buf);
+    }
+    /**
+     * Write data to a file via the v2 agent-friendly API (POST /v2/file).
+     * Parent directories are created automatically.
+     */
+    async writeFileV2(path, data, opts) {
+        const res = await fetch(`${this.config.envdUrl}/v2/file?path=${encodeURIComponent(path)}`, {
+            method: 'POST',
+            headers: { ...this.headers, 'Content-Type': 'application/octet-stream' },
+            body: data instanceof Uint8Array ? data : typeof data === 'string' ? new TextEncoder().encode(data) : data,
+            signal: this.abortSignal(opts?.requestTimeoutMs),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw parseAPIError(res.status, err);
+        }
     }
 }
